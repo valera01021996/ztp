@@ -226,11 +226,12 @@ def get_or_create_device_type(model: str, manufacturer: Manufacturer, height: in
 
 
 def get_or_create_role(name: str):
-    obj, created = DeviceRole.objects.get_or_create(
-        name=name,
-        defaults={"slug": slugify(name), "color": "2196f3"},
-    )
-    return obj, created
+    slug = slugify(name)
+    obj = DeviceRole.objects.filter(slug=slug).first() or DeviceRole.objects.filter(name=name).first()
+    if obj:
+        return obj, False
+    obj = DeviceRole.objects.create(name=name, slug=slug, color="2196f3")
+    return obj, True
 
 
 def get_or_create_platform(name: str):
@@ -563,7 +564,14 @@ class ExcelImport(Script):
             if created:
                 self.log_success(f"Создан IP: {address} → {device_name}/{iface_name}")
             else:
-                self.log_info(f"IP уже существует: {address}")
+                # Обновляем привязку к интерфейсу если она не задана
+                if iface and ip_obj.assigned_object_id != iface.pk:
+                    ip_obj.assigned_object_type = ct
+                    ip_obj.assigned_object_id   = iface.pk
+                    ip_obj.save()
+                    self.log_success(f"Обновлена привязка IP {address} → {device_name}/{iface_name}")
+                else:
+                    self.log_info(f"IP уже существует: {address}")
 
             # Назначаем IP по типу интерфейса (или по флагу IsPrimary из Excel)
             if device and ip_obj:
