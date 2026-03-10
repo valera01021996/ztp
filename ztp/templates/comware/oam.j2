@@ -1,0 +1,39 @@
+{% include 'comware/base.j2' %}
+{% if vlans %}
+{% for vlan in vlans %}
+vlan {{ vlan.vid }}
+ name {{ vlan.name }}
+#
+{% endfor %}
+{% endif %}
+{% for iface in interfaces %}
+{% if iface.name == mgmt_iface %}{% continue %}{% endif %}
+{% if not iface.mode %}{% continue %}{% endif %}
+interface {{ iface.name }}
+{% if iface.description %}
+ description {{ iface.description }}
+{% endif %}
+{% if iface.mode == 'access' %}
+ port link-type access
+{% if iface.untagged_vlan %}
+ port access vlan {{ iface.untagged_vlan }}
+{% endif %}
+{% elif iface.mode == 'tagged' %}
+ port link-type trunk
+ undo port trunk permit vlan 1
+ port trunk permit vlan {{ iface.tagged_vlans | join(' ') }}
+{% elif iface.mode == 'tagged-all' %}
+ port link-type trunk
+ port trunk permit vlan all
+{% endif %}
+{% if iface.mtu %}
+ jumboframe enable {{ iface.mtu }}
+{% endif %}
+{% if iface.enabled %}
+ undo shutdown
+{% else %}
+ shutdown
+{% endif %}
+#
+{% endfor %}
+return

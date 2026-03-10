@@ -1,0 +1,35 @@
+{% include 'eos/base.j2' %}
+{% if vlans %}
+! === VLANs ===
+{% for vlan in vlans %}
+vlan {{ vlan.vid }}
+   name {{ vlan.name }}
+{% endfor %}
+!
+{% endif %}
+! === Interfaces ===
+{% for iface in interfaces %}
+interface {{ iface.name }}
+{% if iface.description %}
+   description {{ iface.description }}
+{% endif %}
+{% if iface.mode == 'access' %}
+   switchport mode access
+{% if iface.untagged_vlan %}
+   switchport access vlan {{ iface.untagged_vlan }}
+{% endif %}
+{% elif iface.mode == 'tagged' %}
+   switchport mode trunk
+{% if iface.tagged_vlans %}
+   switchport trunk allowed vlan {{ iface.tagged_vlans | join(',') }}
+{% endif %}
+{% elif iface.mode == 'tagged-all' %}
+   switchport mode trunk
+{% endif %}
+{% if iface.mtu %}
+   mtu {{ iface.mtu }}
+{% endif %}
+   {{ 'no shutdown' if iface.enabled else 'shutdown' }}
+!
+{% endfor %}
+end

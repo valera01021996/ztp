@@ -1,0 +1,54 @@
+{% include 'comware/base.j2' %}
+{% for iface in interfaces %}
+{% if iface.ip_address %}
+interface {{ iface.name }}
+{% if iface.description %}
+ description {{ iface.description }}
+{% endif %}
+ ip address {{ iface.ip_address | cidr_to_mask }}
+{% if iface.mtu %}
+ jumboframe enable {{ iface.mtu }}
+{% endif %}
+ undo shutdown
+#
+{% endif %}
+{% endfor %}
+{% if ospf %}
+ospf {{ ospf.process_id | default(1) }} router-id {{ ospf.router_id | default('0.0.0.0') }}
+{% if ospf.passive_default %}
+ silent-interface all
+{% endif %}
+ area 0.0.0.0
+#
+{% for iface in interfaces %}
+{% if iface.name in ospf_ifaces %}
+interface {{ iface.name }}
+ ospf enable {{ ospf.process_id | default(1) }} area {{ ospf_ifaces[iface.name].area | default('0.0.0.0') }}
+{% if ospf_ifaces[iface.name].network_type %}
+ ospf network-type {{ ospf_ifaces[iface.name].network_type }}
+{% endif %}
+{% if ospf.passive_default %}
+ undo ospf silent
+{% endif %}
+#
+{% endif %}
+{% endfor %}
+{% endif %}
+{% if bgp %}
+bgp {{ bgp.asn }}
+ router-id {{ bgp.router_id | default('0.0.0.0') }}
+{% for neighbor in bgp.neighbors | default([]) %}
+ peer {{ neighbor.ip }} as-number {{ neighbor.remote_as }}
+{% if neighbor.description %}
+ peer {{ neighbor.ip }} description {{ neighbor.description }}
+{% endif %}
+{% endfor %}
+ #
+ address-family ipv4 unicast
+{% for neighbor in bgp.neighbors | default([]) %}
+  peer {{ neighbor.ip }} enable
+{% endfor %}
+ #
+#
+{% endif %}
+return

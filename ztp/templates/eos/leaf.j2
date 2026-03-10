@@ -1,0 +1,148 @@
+{% include 'eos/base.j2' %}
+{% if hardware and hardware.tcam_profile %}
+hardware tcam
+   system profile {{ hardware.tcam_profile }}
+!
+{% endif %}
+{% if interface_defaults %}
+interface defaults
+{% if interface_defaults.mtu %}
+   mtu {{ interface_defaults.mtu }}
+{% endif %}
+!
+{% endif %}
+{% for vrf in vrfs %}
+vrf instance {{ vrf.name }}
+!
+{% endfor %}
+{% if ip_virtual_router_mac %}
+ip virtual-router mac-address {{ ip_virtual_router_mac }}
+!
+{% endif %}
+{% set switchport_ifaces = interfaces | selectattr('mode') | list %}
+{% set svi_ifaces = interfaces | selectattr('name', 'match', '^Vlan') | list %}
+{% set routed_ifaces = interfaces | rejectattr('mode') | rejectattr('name', 'match', '^Vlan') | list %}
+{% if vlans %}
+! === VLANs ===
+{% for vlan in vlans %}
+vlan {{ vlan.vid }}
+   name {{ vlan.name }}
+!
+{% endfor %}
+{% endif %}
+! === Underlay (routed) interfaces ===
+{% for iface in routed_ifaces %}
+{% if iface.ip_address %}
+interface {{ iface.name }}
+{% if iface.description %}
+   description {{ iface.description }}
+{% endif %}
+   no switchport
+   ip address {{ iface.ip_address }}
+{% if iface.mtu %}
+   mtu {{ iface.mtu }}
+{% endif %}
+   {{ 'no shutdown' if iface.enabled else 'shutdown' }}
+!
+{% endif %}
+{% endfor %}
+{% if switchport_ifaces %}
+! === Server-facing ports ===
+{% for iface in switchport_ifaces %}
+interface {{ iface.name }}
+{% if iface.description %}
+   description {{ iface.description }}
+{% endif %}
+{% if iface.mode == 'access' %}
+   switchport mode access
+{% if iface.untagged_vlan %}
+   switchport access vlan {{ iface.untagged_vlan }}
+{% endif %}
+{% elif iface.mode == 'tagged' %}
+   switchport mode trunk
+{% if iface.tagged_vlans %}
+   switchport trunk allowed vlan {{ iface.tagged_vlans | join(',') }}
+{% endif %}
+{% elif iface.mode == 'tagged-all' %}
+   switchport mode trunk
+{% endif %}
+   {{ 'no shutdown' if iface.enabled else 'shutdown' }}
+!
+{% endfor %}
+{% endif %}
+{% if svi_ifaces %}
+! === SVIs (L3 gateways) ===
+{% for iface in svi_ifaces %}
+{% if iface.ip_address %}
+interface {{ iface.name }}
+{% if iface.description %}
+   description {{ iface.description }}
+{% endif %}
+{% if iface.vrf %}
+   vrf {{ iface.vrf }}
+{% endif %}
+   ip address virtual {{ iface.ip_address }}
+   {{ 'no shutdown' if iface.enabled else 'shutdown' }}
+!
+{% endif %}
+{% endfor %}
+{% endif %}
+{% if ospf %}
+! === OSPF ===
+router ospf {{ ospf.process_id | default(1) }}
+   router-id {{ ospf.router_id | default('0.0.0.0') }}
+{% if ospf.passive_default %}
+   passive-interface default
+{% endif %}
+!
+{% for iface in routed_ifaces %}
+{% if iface.name in ospf_ifaces %}
+interface {{ iface.name }}
+   ip ospf area {{ ospf_ifaces[iface.name].area | default('0.0.0.0') }}
+{% if ospf_ifaces[iface.name].network_type %}
+   ip ospf network {{ ospf_ifaces[iface.name].network_type }}
+{% endif %}
+   no passive-interface
+!
+{% endif %}
+{% endfor %}
+{% endif %}
+{% if bgp %}
+! === BGP ===
+router bgp {{ bgp.asn }}
+   router-id {{ bgp.router_id | default('0.0.0.0') }}
+{% if bgp.send_community %}
+   neighbor default send-community
+{% endif %}
+{% for neighbor in bgp.neighbors | default([]) %}
+   neighbor {{ neighbor.ip }} remote-as {{ neighbor.remote_as }}
+{% if neighbor.description %}
+   neighbor {{ neighbor.ip }} description {{ neighbor.description }}
+{% endif %}
+{% if neighbor.update_source %}
+   neighbor {{ neighbor.ip }} update-source {{ neighbor.update_source }}
+{% endif %}
+{% endfor %}
+   !
+   address-family evpn
+{% for neighbor in bgp.neighbors | default([]) %}
+{% if neighbor.evpn %}
+      neighbor {{ neighbor.ip }} activate
+{% endif %}
+{% endfor %}
+   !
+{% for vrf in vrfs %}
+   vrf {{ vrf.name }}
+      rd {{ vrf.rd }}
+{% for rt in vrf.import_targets %}
+      route-target import evpn {{ rt }}
+{% endfor %}
+{% for rt in vrf.export_targets %}
+      route-target export evpn {{ rt }}
+{% endfor %}
+      redistribute connected
+   !
+{% endfor %}
+!
+{% endif %}
+end
