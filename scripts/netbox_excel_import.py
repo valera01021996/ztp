@@ -21,7 +21,7 @@ from dcim.models import (
     Manufacturer, DeviceType, DeviceRole, Platform,
     Device, Interface,
 )
-from ipam.models import VLAN, IPAddress, Prefix
+from ipam.models import VLAN, VRF, RouteTarget, IPAddress, Prefix
 from tenancy.models import Tenant
 from extras.models import Tag
 
@@ -183,9 +183,13 @@ def get_or_create_region(name: str):
 
 def get_or_create_site(name: str, region_name: str):
     region, _ = get_or_create_region(region_name)
+    slug = slugify(name)
+    obj = Site.objects.filter(slug=slug).first()
+    if obj:
+        return obj, False
     obj, created = Site.objects.get_or_create(
         name=name,
-        defaults={"slug": slugify(name), "region": region, "status": "active"},
+        defaults={"slug": slug, "region": region, "status": "active"},
     )
     return obj, created
 
@@ -209,9 +213,13 @@ def get_or_create_rack(name: str, site: Site, location=None):
 
 
 def get_or_create_manufacturer(name: str):
+    slug = slugify(name)
+    obj = Manufacturer.objects.filter(slug=slug).first()
+    if obj:
+        return obj, False
     obj, created = Manufacturer.objects.get_or_create(
         name=name,
-        defaults={"slug": slugify(name)},
+        defaults={"slug": slug},
     )
     return obj, created
 
@@ -235,10 +243,24 @@ def get_or_create_role(name: str):
 
 
 def get_or_create_platform(name: str):
+    slug = slugify(name)
+    obj = Platform.objects.filter(slug=slug).first()
+    if obj:
+        return obj, False
     obj, created = Platform.objects.get_or_create(
         name=name,
-        defaults={"slug": slugify(name)},
+        defaults={"slug": slug},
     )
+    return obj, created
+
+
+def get_or_create_vrf(name: str):
+    obj, created = VRF.objects.get_or_create(name=name)
+    return obj, created
+
+
+def get_or_create_rt(name: str):
+    obj, created = RouteTarget.objects.get_or_create(name=name)
     return obj, created
 
 
@@ -283,6 +305,7 @@ class ExcelImport(Script):
         wb = load_workbook(BytesIO(content), data_only=True)
 
         self._import_devices(wb, dry)
+        self._import_vrfs(wb, dry)
         self._import_vlans(wb, dry)
         self._import_interfaces(wb, dry)
         self._import_ips(wb, dry)
@@ -393,6 +416,62 @@ class ExcelImport(Script):
                 else:
                     self.log_failure(f"Ошибка создания {name}: {e}")
 
+    # ── VRFs ──────────────────────────────────────────────────────────────────
+
+    def _import_vrfs(self, wb, dry: bool):
+        col_map, rows = read_sheet(wb, "VRFs")
+        if not rows:
+            self.log_info("Лист VRFs: данных нет")
+            return
+
+        self.log_info(f"Лист VRFs: {len(rows)} строк(и)")
+
+        for row in rows:
+            name           = str_val(cv(row, col_map, "Name"))
+            rd             = str_val(cv(row, col_map, "RD"))
+            import_raw     = str_val(cv(row, col_map, "ImportTargets"))
+            export_raw     = str_val(cv(row, col_map, "ExportTargets"))
+            description    = str_val(cv(row, col_map, "Description")) or ""
+
+            if not name:
+                continue
+
+            import_rts = [t.strip() for t in import_raw.split(",") if t.strip()] if import_raw else []
+            export_rts = [t.strip() for t in export_raw.split(",") if t.strip()] if export_raw else []
+
+            if dry:
+                self.log_success(
+                    f"[DRY] Создал бы VRF: {name} rd={rd} "
+                    f"import={import_rts} export={export_rts}"
+                )
+                continue
+
+            vrf, created = VRF.objects.get_or_create(
+                name=name,
+                defaults={"rd": rd or "", "description": description},
+            )
+            if not created:
+                if rd:
+                    vrf.rd = rd
+                if description:
+                    vrf.description = description
+                vrf.save()
+                self.log_info(f"VRF уже существует, обновлён: {name}")
+            else:
+                self.log_success(f"Создан VRF: {name} rd={rd}")
+
+            # Import Route Targets
+            if import_rts:
+                rt_objs = [get_or_create_rt(rt)[0] for rt in import_rts]
+                vrf.import_targets.set(rt_objs)
+                self.log_success(f"  Import RT: {import_rts}")
+
+            # Export Route Targets
+            if export_rts:
+                rt_objs = [get_or_create_rt(rt)[0] for rt in export_rts]
+                vrf.export_targets.set(rt_objs)
+                self.log_success(f"  Export RT: {export_rts}")
+
     # ── VLANs ─────────────────────────────────────────────────────────────────
 
     def _import_vlans(self, wb, dry: bool):
@@ -454,6 +533,7 @@ class ExcelImport(Script):
             description  = str_val(cv(row, col_map, "Description")) or ""
             enabled      = bool_val(cv(row, col_map, "Enabled")) if cv(row, col_map, "Enabled") is not None else True
             mtu          = int_val(cv(row, col_map, "MTU"))
+            vrf_name     = str_val(cv(row, col_map, "VRF"))
 
             tagged_vids = []
             if tagged_raw:
@@ -463,7 +543,8 @@ class ExcelImport(Script):
                         tagged_vids.append(v)
 
             if dry:
-                self.log_success(f"[DRY] Создал бы Interface: {device_name} / {iface_name} mode={nb_mode}")
+                vrf_info = f" vrf={vrf_name}" if vrf_name else ""
+                self.log_success(f"[DRY] Создал бы Interface: {device_name} / {iface_name} mode={nb_mode}{vrf_info}")
                 continue
 
             device = Device.objects.filter(name=device_name).first()
@@ -474,6 +555,15 @@ class ExcelImport(Script):
             untagged_vlan = VLAN.objects.filter(vid=untagged_vid).first() if untagged_vid else None
             tagged_vlans  = list(VLAN.objects.filter(vid__in=tagged_vids)) if tagged_vids else []
 
+            # VRF — создаём если не существует
+            vrf = None
+            if vrf_name:
+                vrf, vrf_created = get_or_create_vrf(vrf_name)
+                if vrf_created:
+                    self.log_success(f"Создан VRF: {vrf_name}")
+                else:
+                    self.log_info(f"VRF уже существует: {vrf_name}")
+
             defaults = {
                 "type":          iface_type,
                 "mode":          nb_mode or "",
@@ -481,6 +571,7 @@ class ExcelImport(Script):
                 "enabled":       enabled,
                 "mtu":           mtu,
                 "untagged_vlan": untagged_vlan,
+                "vrf":           vrf,
             }
 
             iface, created = Interface.objects.get_or_create(

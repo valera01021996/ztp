@@ -7,8 +7,19 @@ vlan {{ vlan.vid }}
 {% endfor %}
 {% endif %}
 {% for iface in interfaces %}
-{% if iface.name == mgmt_iface %}{% continue %}{% endif %}
-{% if not iface.mode %}{% continue %}{% endif %}
+{% if iface.name != mgmt_iface %}
+{% if iface.name is vlan_iface and iface.ip_address %}
+interface {{ iface.name | comware_iface }}
+{% if iface.description %}
+ description {{ iface.description }}
+{% endif %}
+{% if iface.vrf %}
+ ip binding vpn-instance {{ iface.vrf }}
+{% endif %}
+ ip address {{ iface.ip_address | cidr_to_mask }}
+ undo shutdown
+#
+{% elif iface.mode %}
 interface {{ iface.name }}
 {% if iface.description %}
  description {{ iface.description }}
@@ -35,5 +46,7 @@ interface {{ iface.name }}
  shutdown
 {% endif %}
 #
+{% endif %}
+{% endif %}
 {% endfor %}
 return

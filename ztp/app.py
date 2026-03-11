@@ -30,7 +30,7 @@ from base64 import b64encode
 from jinja2 import Environment, FileSystemLoader
 
 import pynetbox
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -74,8 +74,19 @@ _jinja_env = Environment(
     lstrip_blocks=True,
     keep_trailing_newline=True,
 )
-_jinja_env.filters["cidr_to_mask"] = _cidr_to_mask
-_jinja_env.tests["match"] = lambda value, pattern: bool(re.match(pattern, str(value)))
+def _comware_iface_name(name: str) -> str:
+    """Vlan10 / VLAN10 / Vlan 10  →  Vlan-interface10 (H3C Comware naming)."""
+    m = re.match(r'^[Vv][Ll][Aa][Nn]\s*(\d+)$', name.strip())
+    if m:
+        return "Vlan-interface" + m.group(1)
+    return name
+
+_jinja_env.filters["cidr_to_mask"]  = _cidr_to_mask
+_jinja_env.filters["comware_iface"] = _comware_iface_name
+_jinja_env.tests["match"]      = lambda value, pattern: bool(re.match(pattern, str(value)))
+_jinja_env.tests["vlan_iface"] = lambda value: bool(
+    re.match(r'^[Vv][Ll][Aa][Nn]\s*\d+$', str(value).strip())
+)
 
 
 def get_nb():
@@ -134,6 +145,163 @@ def get_eapi(device) -> AristaEAPI:
     return AristaEAPI(ip, SWITCH_USER, SWITCH_PASSWORD)
 
 
+# ─── H3C NETCONF client ───────────────────────────────────────────────────────
+
+H3C_NS_CFG  = "http://www.h3c.com/netconf/config:1.0"
+H3C_NS_DATA = "http://www.h3c.com/netconf/data:1.0"
+
+class H3CNetconf:
+    def __init__(self, ip: str, username: str, password: str, port: int = 830):
+        self.ip       = ip
+        self.username = username
+        self.password = password
+        self.port     = port
+
+    def _connect(self):
+        from ncclient import manager
+        return manager.connect(
+            host=self.ip,
+            port=self.port,
+            username=self.username,
+            password=self.password,
+            hostkey_verify=False,
+            device_params={"name": "h3c"},
+            timeout=15,
+        )
+
+    def get_vlans(self) -> list[dict]:
+        filter_xml = f"""
+        <filter type="subtree">
+          <top xmlns="{H3C_NS_DATA}">
+            <VLAN><VLANs/></VLAN>
+          </top>
+        </filter>"""
+        try:
+            with self._connect() as m:
+                result = m.get(filter_xml)
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"NETCONF error: {e}")
+
+        import xml.etree.ElementTree as ET
+        root = ET.fromstring(str(result))
+        vlans = []
+        ns = {"h3c": H3C_NS_DATA}
+        for vlan in root.findall(".//h3c:VLANID", ns):
+            vid_el  = vlan.find("h3c:ID", ns)
+            name_el = vlan.find("h3c:Name", ns)
+            if vid_el is not None:
+                vlans.append({
+                    "vid":  int(vid_el.text),
+                    "name": name_el.text if name_el is not None else "",
+                })
+        return vlans
+
+    def create_vlan(self, vid: int, name: str = ""):
+        vlan_name = name or f"VLAN{vid}"
+        config_xml = f"""
+        <config>
+          <top xmlns="{H3C_NS_CFG}">
+            <VLAN>
+              <VLANs>
+                <VLANID>
+                  <ID>{vid}</ID>
+                  <Name>{vlan_name}</Name>
+                </VLANID>
+              </VLANs>
+            </VLAN>
+          </top>
+        </config>"""
+        try:
+            with self._connect() as m:
+                m.edit_config(target="running", config=config_xml)
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"NETCONF error: {e}")
+
+    def delete_vlan(self, vid: int):
+        config_xml = f"""
+        <config>
+          <top xmlns="{H3C_NS_CFG}">
+            <VLAN>
+              <VLANs>
+                <VLANID nc:operation="delete" xmlns:nc="urn:ietf:params:xml:ns:netconf:base:1.0">
+                  <ID>{vid}</ID>
+                </VLANID>
+              </VLANs>
+            </VLAN>
+          </top>
+        </config>"""
+        try:
+            with self._connect() as m:
+                m.edit_config(target="running", config=config_xml)
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"NETCONF error: {e}")
+
+    def _cli(self, commands: list[str]):
+        """Send CLI config commands via paramiko SSH (handles H3C password-change prompt)."""
+        import paramiko, time
+
+        def _recv(shell, timeout=3) -> str:
+            time.sleep(timeout)
+            out = b""
+            while shell.recv_ready():
+                out += shell.recv(4096)
+            return out.decode("utf-8", errors="ignore")
+
+        try:
+            client = paramiko.SSHClient()
+            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            client.connect(self.ip, username=self.username, password=self.password, timeout=15)
+            shell = client.invoke_shell()
+            output = _recv(shell, 2)
+            # Handle "Do you want to change the password?" prompt
+            if "change" in output.lower() or "[y/n]" in output.lower():
+                shell.send("n\n")
+                _recv(shell, 1)
+            # Enter system-view
+            shell.send("system-view\n")
+            _recv(shell, 1)
+            for cmd in commands:
+                shell.send(cmd + "\n")
+                _recv(shell, 0.5)
+            shell.send("return\n")
+            _recv(shell, 0.5)
+            shell.send("save force\n")
+            _recv(shell, 3)
+            client.close()
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"SSH error: {e}")
+
+    def set_trunk_vlans(self, interface: str, vlans: list[int]):
+        vids = " ".join(str(v) for v in vlans)
+        self._cli([
+            f"interface {interface}",
+            "port link-type trunk",
+            f"port trunk permit vlan {vids}",
+        ])
+
+    def set_access_vlan(self, interface: str, vlan: int, description: str = ""):
+        cmds = [
+            f"interface {interface}",
+            "port link-type access",
+            f"port access vlan {vlan}",
+        ]
+        if description:
+            cmds.append(f"description {description}")
+        self._cli(cmds)
+
+
+def get_platform(device) -> str:
+    """Возвращает slug платформы устройства."""
+    return device.platform.slug if device.platform else "eos"
+
+
+def get_h3c(device) -> H3CNetconf:
+    if not device.primary_ip4:
+        raise HTTPException(status_code=400, detail=f"У устройства {device.name} не задан primary_ip4")
+    ip = str(device.primary_ip4).split("/")[0]
+    return H3CNetconf(ip, SWITCH_USER, SWITCH_PASSWORD)
+
+
 # ─── ZTP endpoints ────────────────────────────────────────────────────────────
 
 @app.get("/ztp.py", response_class=PlainTextResponse)
@@ -148,6 +316,13 @@ def serve_h3c_ztp_script():
     """H3C Comware скачивает этот скрипт и выполняет его при ZTP."""
     with open(H3C_ZTP_SCRIPT_PATH) as f:
         return f.read()
+
+
+@app.get("/debug/{msg}", response_class=PlainTextResponse)
+def debug_log(msg: str, request: Request):
+    import logging
+    logging.warning("ZTP DEBUG [%s]: %s", request.client.host, msg)
+    return "ok"
 
 
 @app.get("/config/{serial}", response_class=PlainTextResponse)
@@ -196,48 +371,31 @@ class AccessIn(BaseModel):
 
 @app.get("/devices/{name}/vlans")
 def list_vlans(name: str):
-    """
-    Возвращает VLANы из NetBox (source of truth).
-    Дополнительно проверяет что они реально есть на коммутаторе.
-    """
     nb = get_nb()
     device = get_device_by_name(nb, name)
-
-    # Берём VLANы из NetBox привязанные к сайту устройства
     site_id = device.site.id if device.site else None
-    nb_vlans = {
-        v.vid: v.name
-        for v in nb.ipam.vlans.filter(site_id=site_id)
-    }
+    platform = get_platform(device)
 
-    # Проверяем фактическое состояние на коммутаторе
-    eapi = get_eapi(device)
-    result = eapi.run(["show vlan"])
-    switch_vids = set(
-        int(vid) for vid in result[0].get("vlans", {})
-        if vid != "1"
-    )
+    nb_vlans = {v.vid: v.name for v in nb.ipam.vlans.filter(site_id=site_id)}
+
+    if platform == "comware":
+        switch_vids = {v["vid"] for v in get_h3c(device).get_vlans()}
+    else:
+        result = get_eapi(device).run(["show vlan"])
+        switch_vids = {int(v) for v in result[0].get("vlans", {}) if v != "1"}
 
     return [
-        {
-            "vid": vid,
-            "name": name,
-            "on_switch": vid in switch_vids,
-        }
-        for vid, name in sorted(nb_vlans.items())
+        {"vid": vid, "name": vname, "on_switch": vid in switch_vids}
+        for vid, vname in sorted(nb_vlans.items())
     ]
 
 
 @app.post("/devices/{name}/vlans")
 def add_vlan(name: str, body: VlanIn):
-    """
-    Добавить VLAN:
-    1. Создать в NetBox (если не существует)
-    2. Применить на коммутаторе
-    """
     nb = get_nb()
     device = get_device_by_name(nb, name)
     site_id = device.site.id if device.site else None
+    platform = get_platform(device)
 
     # 1. NetBox
     nb_status = "created"
@@ -256,29 +414,29 @@ def add_vlan(name: str, body: VlanIn):
             raise HTTPException(status_code=500, detail=f"NetBox error: {e}")
 
     # 2. Коммутатор
-    eapi = get_eapi(device)
-    commands = ["enable", "configure", f"vlan {body.vid}"]
-    if body.name:
-        commands.append(f"name {body.name}")
-    eapi.run(commands)
+    if platform == "comware":
+        get_h3c(device).create_vlan(body.vid, body.name)
+    else:
+        cmds = ["enable", "configure", f"vlan {body.vid}"]
+        if body.name:
+            cmds.append(f"name {body.name}")
+        get_eapi(device).run(cmds)
 
     return {"status": "ok", "vid": body.vid, "name": body.name, "netbox": nb_status}
 
 
 @app.delete("/devices/{name}/vlans/{vid}")
 def delete_vlan(name: str, vid: int):
-    """
-    Удалить VLAN:
-    1. Удалить с коммутатора
-    2. Удалить из NetBox
-    """
     nb = get_nb()
     device = get_device_by_name(nb, name)
     site_id = device.site.id if device.site else None
+    platform = get_platform(device)
 
     # 1. Коммутатор
-    eapi = get_eapi(device)
-    eapi.run(["enable", "configure", f"no vlan {vid}"])
+    if platform == "comware":
+        get_h3c(device).delete_vlan(vid)
+    else:
+        get_eapi(device).run(["enable", "configure", f"no vlan {vid}"])
 
     # 2. NetBox
     nb_status = "not_found"
@@ -292,94 +450,78 @@ def delete_vlan(name: str, vid: int):
 
 @app.post("/devices/{name}/trunk")
 def add_vlan_to_trunk(name: str, body: TrunkIn):
-    """
-    Добавить VLAN(ы) в транк:
-    1. Обновить tagged_vlans интерфейса в NetBox
-    2. Применить на коммутаторе
-    """
     nb = get_nb()
     device = get_device_by_name(nb, name)
+    site_id = device.site.id if device.site else None
+    platform = get_platform(device)
 
-    # 1. NetBox — обновляем интерфейс
+    # 1. NetBox — обновляем интерфейс (создаём если нет)
     nb_iface = nb.dcim.interfaces.get(device_id=device.id, name=body.interface)
     if not nb_iface:
-        raise HTTPException(status_code=404, detail=f"Интерфейс {body.interface} не найден в NetBox")
+        nb_iface = nb.dcim.interfaces.create(
+            device=device.id, name=body.interface, type="1000base-t"
+        )
 
-    # Собираем текущие tagged_vlans + новые
     current_vids = {v.id for v in (nb_iface.tagged_vlans or [])}
-    site_id = device.site.id if device.site else None
-
+    vlan_ids_int = []
     for vid in body.vlans:
         vlans = list(nb.ipam.vlans.filter(vid=vid, site_id=site_id))
         if not vlans:
-            raise HTTPException(
-                status_code=400,
-                detail=f"VLAN {vid} не найден в NetBox — сначала создайте его через POST /devices/{name}/vlans"
-            )
+            raise HTTPException(status_code=400,
+                detail=f"VLAN {vid} не найден в NetBox — сначала создайте через POST /devices/{name}/vlans")
         current_vids.add(vlans[0].id)
+        vlan_ids_int.append(int(vid))
 
-    nb_iface.update({
-        "mode": "tagged",
-        "tagged_vlans": list(current_vids),
-    })
+    nb_iface.update({"mode": "tagged", "tagged_vlans": list(current_vids)})
 
     # 2. Коммутатор
-    eapi = get_eapi(device)
-    vids_str = ",".join(str(v) for v in body.vlans)
-    eapi.run([
-        "enable",
-        "configure",
-        f"interface {body.interface}",
-        "switchport mode trunk",
-        f"switchport trunk allowed vlan add {vids_str}",
-    ])
+    if platform == "comware":
+        get_h3c(device).set_trunk_vlans(body.interface, vlan_ids_int)
+    else:
+        vids_str = ",".join(str(v) for v in body.vlans)
+        get_eapi(device).run([
+            "enable", "configure",
+            f"interface {body.interface}",
+            "switchport mode trunk",
+            f"switchport trunk allowed vlan add {vids_str}",
+        ])
 
     return {"status": "ok", "interface": body.interface, "vlans_added": body.vlans}
 
 
 @app.post("/devices/{name}/access")
 def set_access_port(name: str, body: AccessIn):
-    """
-    Настроить access-порт:
-    1. Проверить что VLAN существует в NetBox
-    2. Обновить интерфейс в NetBox (mode=access, untagged_vlan, description)
-    3. Применить на коммутаторе
-    """
     nb = get_nb()
     device = get_device_by_name(nb, name)
     site_id = device.site.id if device.site else None
+    platform = get_platform(device)
 
-    # Проверяем что VLAN есть в NetBox
     vlans = list(nb.ipam.vlans.filter(vid=body.vlan, site_id=site_id))
     if not vlans:
-        raise HTTPException(
-            status_code=400,
-            detail=f"VLAN {body.vlan} не найден в NetBox — сначала создайте через POST /devices/{name}/vlans"
-        )
+        raise HTTPException(status_code=400,
+            detail=f"VLAN {body.vlan} не найден в NetBox — сначала создайте через POST /devices/{name}/vlans")
     vlan_obj = vlans[0]
 
-    # Ищем интерфейс в NetBox
     nb_iface = nb.dcim.interfaces.get(device_id=device.id, name=body.interface)
     if not nb_iface:
-        raise HTTPException(status_code=404, detail=f"Интерфейс {body.interface} не найден в NetBox")
+        nb_iface = nb.dcim.interfaces.create(
+            device=device.id, name=body.interface, type="1000base-t"
+        )
 
-    # Обновляем интерфейс в NetBox
     update = {"mode": "access", "untagged_vlan": vlan_obj.id}
     if body.description:
         update["description"] = body.description
     nb_iface.update(update)
 
-    # Применяем на коммутаторе
-    eapi = get_eapi(device)
-    commands = [
-        "enable", "configure",
-        f"interface {body.interface}",
-        "switchport mode access",
-        f"switchport access vlan {body.vlan}",
-    ]
-    if body.description:
-        commands.append(f"description {body.description}")
-    eapi.run(commands)
+    # 2. Коммутатор
+    if platform == "comware":
+        get_h3c(device).set_access_vlan(body.interface, body.vlan, body.description)
+    else:
+        cmds = ["enable", "configure", f"interface {body.interface}",
+                "switchport mode access", f"switchport access vlan {body.vlan}"]
+        if body.description:
+            cmds.append(f"description {body.description}")
+        get_eapi(device).run(cmds)
 
     return {"status": "ok", "interface": body.interface, "vlan": body.vlan, "description": body.description}
 
@@ -435,12 +577,11 @@ def build_eos_startup_config(nb, device) -> str:
         key=lambda i: i.name,
     )
 
-    # For leaf: attach IP addresses to routed interfaces
+    # Attach IP addresses to interfaces (all roles)
     ip_by_iface: dict[int, str] = {}
-    if role_slug == "leaf":
-        for ip in nb.ipam.ip_addresses.filter(device_id=device.id):
-            if ip.assigned_object_id and ip.assigned_object_type == "dcim.interface":
-                ip_by_iface[ip.assigned_object_id] = str(ip)
+    for ip in nb.ipam.ip_addresses.filter(device_id=device.id):
+        if ip.assigned_object_id and ip.assigned_object_type == "dcim.interface":
+            ip_by_iface[ip.assigned_object_id] = str(ip)
 
     interfaces = []
     for iface in nb_ifaces:
@@ -456,6 +597,12 @@ def build_eos_startup_config(nb, device) -> str:
             needed_vids.add(iface.untagged_vlan.vid)
         for v in (iface.tagged_vlans or []):
             needed_vids.add(v.vid)
+
+    # If mgmt interface is a VLAN interface (e.g. Vlan3900), include that VLAN too
+    if mgmt_iface:
+        m = re.match(r'^[Vv][Ll][Aa][Nn]\s*(\d+)$', mgmt_iface.strip())
+        if m:
+            needed_vids.add(int(m.group(1)))
 
     vlan_map: dict[int, str] = {}
     for vid in needed_vids:

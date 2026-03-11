@@ -3,18 +3,25 @@
 #
 sysname {{ device.name }}
 #
+undo password-control enable
+undo password-control update enable
+#
 local-user admin class manage
  password simple {{ admin_password }}
- service-type ssh terminal
+ service-type telnet ssh terminal
  authorization-attribute user-role network-admin
 #
 line vty 0 4
  authentication-mode scheme
+ user-role network-admin
+ protocol inbound ssh telnet
 #
+telnet server enable
 ssh server enable
+netconf enable
 #
 {% if mgmt_iface and primary_ip %}
-interface {{ mgmt_iface }}
+interface {{ mgmt_iface | comware_iface }}
  ip address {{ primary_ip | cidr_to_mask }}
  undo shutdown
 #
