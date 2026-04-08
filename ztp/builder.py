@@ -60,11 +60,23 @@ def build_config(nb, device, day0_only: bool = False) -> str:
         if ip.assigned_object_id and ip.assigned_object_type == "dcim.interface":
             ip_by_iface[ip.assigned_object_id] = str(ip)
 
+    # Маппинг member → LAG: {iface_name: {"lag_name": "Port-Channel1", "lag_id": 1}}
+    lag_member_map: dict[str, dict] = {}
+    for iface in nb_ifaces:
+        if iface.lag:
+            lag_name = iface.lag.name
+            # Извлекаем номер из Port-Channel1 → 1
+            m = re.search(r'(\d+)$', lag_name)
+            lag_id = int(m.group(1)) if m else None
+            lag_member_map[iface.name] = {"lag_name": lag_name, "lag_id": lag_id}
+
     interfaces = []
     for iface in nb_ifaces:
         d = _iface_to_dict(iface)
         if iface.id in ip_by_iface:
             d["ip_address"] = ip_by_iface[iface.id]
+        if iface.name in lag_member_map:
+            d["lag"] = lag_member_map[iface.name]
         interfaces.append(d)
 
     # VLANs

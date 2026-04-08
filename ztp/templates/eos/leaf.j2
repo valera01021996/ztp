@@ -36,15 +36,19 @@ vlan {{ vlan.vid }}
 {% endif %}
 ! === Underlay (routed) interfaces ===
 {% for iface in routed_ifaces %}
-{% if iface.ip_address %}
+{% if iface.ip_address or iface.lag %}
 interface {{ iface.name }}
 {% if iface.description %}
    description {{ iface.description }}
 {% endif %}
+{% if iface.lag %}
+   channel-group {{ iface.lag.lag_id }} mode active
+{% else %}
    no switchport
    ip address {{ iface.ip_address }}
 {% if iface.mtu %}
    mtu {{ iface.mtu }}
+{% endif %}
 {% endif %}
    {{ 'no shutdown' if iface.enabled else 'shutdown' }}
 !
@@ -85,7 +89,11 @@ interface {{ iface.name }}
 {% if iface.vrf %}
    vrf {{ iface.vrf }}
 {% endif %}
+{% if iface.name == 'Vlan4094' %}
+   ip address {{ iface.ip_address }}
+{% else %}
    ip address virtual {{ iface.ip_address }}
+{% endif %}
    {{ 'no shutdown' if iface.enabled else 'shutdown' }}
 !
 {% endif %}
@@ -192,7 +200,7 @@ router bgp {{ bgp.asn }}
    !
 {% for vrf in vrfs %}
    vrf {{ vrf.name }}
-      rd {{ router_id }}:{{ vrf.rd_suffix | default(vrf.vni) }}
+      rd {{ router_id }}:{{ vrf.rd_suffix if vrf.rd_suffix else vrf.vni }}
       route-target import evpn {{ vrf.route_target }}
       route-target export evpn {{ vrf.route_target }}
 {% if vrf.route_map_export %}
