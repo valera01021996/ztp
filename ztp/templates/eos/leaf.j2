@@ -11,8 +11,12 @@ interface defaults
 {% endif %}
 !
 {% endif %}
+ip routing
+!
 {% for vrf in vrfs %}
 vrf instance {{ vrf.name }}
+!
+ip routing vrf {{ vrf.name }}
 !
 {% endfor %}
 {% if ip_virtual_router_mac %}
@@ -87,12 +91,53 @@ interface {{ iface.name }}
 {% endif %}
 {% endfor %}
 {% endif %}
+{% if mlag %}
+! === MLAG ===
+mlag configuration
+   domain-id {{ mlag.domain_id }}
+   local-interface {{ mlag.local_interface }}
+   peer-address {{ mlag.peer_address }}
+   peer-link {{ mlag.peer_link }}
+   reload-delay mlag {{ mlag.reload_delay | default(300) }}
+   reload-delay non-mlag {{ mlag.reload_delay_non_mlag | default(330) }}
+!
+{% endif %}
+{% if vxlan %}
+! === VXLAN ===
+interface Vxlan1
+   vxlan source-interface {{ vxlan.source_interface | default('Loopback0') }}
+{% if vxlan.virtual_router_encapsulation %}
+   vxlan virtual-router encapsulation mac-address {{ vxlan.virtual_router_encapsulation }}
+{% endif %}
+   vxlan udp-port {{ vxlan.udp_port | default(4789) }}
+{% for entry in vxlan.vlan_vnis | default([]) %}
+   vxlan vlan {{ entry.vlan }} vni {{ entry.vni }}
+{% endfor %}
+{% for vrf in vrfs if vrf.vni is defined %}
+   vxlan vrf {{ vrf.name }} vni {{ vrf.vni }}
+{% endfor %}
+{% if vxlan.mlag_source_interface %}
+   vxlan mlag source-interface {{ vxlan.mlag_source_interface }}
+{% endif %}
+{% if vxlan.flood_vteps %}
+   vxlan flood vtep {{ vxlan.flood_vteps | join(' ') }}
+{% endif %}
+!
+{% endif %}
 {% if ospf %}
 ! === OSPF ===
 router ospf {{ ospf.process_id | default(1) }}
-   router-id {{ ospf.router_id | default('0.0.0.0') }}
+   router-id {{ ospf.router_id | default(router_id) }}
 {% if ospf.passive_default %}
    passive-interface default
+{% endif %}
+{% for iface in routed_ifaces %}
+{% if iface.name in ospf_ifaces %}
+   network {{ iface.ip_address }} area {{ ospf_ifaces[iface.name].area | default('0.0.0.0') }}
+{% endif %}
+{% endfor %}
+{% if ospf.max_lsa %}
+   max-lsa {{ ospf.max_lsa }}
 {% endif %}
 !
 {% for iface in routed_ifaces %}
@@ -110,7 +155,14 @@ interface {{ iface.name }}
 {% if bgp %}
 ! === BGP ===
 router bgp {{ bgp.asn }}
-   router-id {{ bgp.router_id | default('0.0.0.0') }}
+   router-id {{ bgp.router_id | default(router_id) }}
+{% if bgp.no_default_ipv4 %}
+   no bgp default ipv4-unicast
+{% endif %}
+{% if bgp.graceful_restart %}
+   graceful-restart restart-time {{ bgp.graceful_restart_time | default(300) }}
+   graceful-restart
+{% endif %}
 {% if bgp.send_community %}
    neighbor default send-community
 {% endif %}
@@ -124,6 +176,13 @@ router bgp {{ bgp.asn }}
 {% endif %}
 {% endfor %}
    !
+{% for entry in vxlan.vlan_vnis | default([]) %}
+   vlan {{ entry.vlan }}
+      rd {{ router_id }}:{{ entry.vni }}
+      route-target both {{ entry.vni }}:{{ entry.vni }}
+      redistribute learned
+   !
+{% endfor %}
    address-family evpn
 {% for neighbor in bgp.neighbors | default([]) %}
 {% if neighbor.evpn %}
@@ -133,14 +192,14 @@ router bgp {{ bgp.asn }}
    !
 {% for vrf in vrfs %}
    vrf {{ vrf.name }}
-      rd {{ vrf.rd }}
-{% for rt in vrf.import_targets %}
-      route-target import evpn {{ rt }}
-{% endfor %}
-{% for rt in vrf.export_targets %}
-      route-target export evpn {{ rt }}
-{% endfor %}
+      rd {{ router_id }}:{{ vrf.rd_suffix | default(vrf.vni) }}
+      route-target import evpn {{ vrf.route_target }}
+      route-target export evpn {{ vrf.route_target }}
+{% if vrf.route_map_export %}
+      redistribute connected route-map {{ vrf.route_map_export }}
+{% else %}
       redistribute connected
+{% endif %}
    !
 {% endfor %}
 !

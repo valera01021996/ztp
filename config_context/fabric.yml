@@ -1,0 +1,62 @@
+# Fabric-wide config context — применяется ко всем leaf
+# NetBox: Extras → Config Contexts → Role: leaf
+
+hardware:
+  tcam_profile: vxlan-routing
+
+interface_defaults:
+  mtu: 9214
+
+ip_virtual_router_mac: "00:1c:73:00:00:01"
+
+# ── MLAG (общее) ─────────────────────────────────────────────────────────────
+mlag:
+  domain_id: 100
+  peer_link: Port-Channel100
+  local_interface: Vlan4094
+  reload_delay: 300
+  reload_delay_non_mlag: 330
+  # peer_address — device-specific, в inventory.yml
+
+# ── VXLAN (общее) ─────────────────────────────────────────────────────────────
+vxlan:
+  udp_port: 4789
+  source_interface: Loopback0
+  mlag_source_interface: Loopback1
+  virtual_router_encapsulation: mlag-system-id
+  # flood_vteps — device-specific, в inventory.yml
+  # vlan_vnis — device-specific, в inventory.yml config_context
+
+# VRF → L3 VNI
+vrf_extra:
+  PROD:
+    vni: 50000
+    rd_suffix: 50000
+    route_target: "50000:50000"
+    route_map_export: PROD-EXPORT
+
+# ── BGP (общее) ───────────────────────────────────────────────────────────────
+bgp:
+  no_default_ipv4: true
+  graceful_restart: true
+  graceful_restart_time: 300
+  send_community: true
+  # asn, neighbors — device-specific, в inventory.yml
+
+# ── OSPF (общее) ──────────────────────────────────────────────────────────────
+ospf:
+  process_id: 1
+  passive_default: true
+  max_lsa: 12000
+
+ospf_interfaces:
+  Ethernet49/1:
+    area: "0.0.0.0"
+    network_type: point-to-point
+  Ethernet50/1:
+    area: "0.0.0.0"
+    network_type: point-to-point
+  Loopback0:
+    area: "0.0.0.0"
+  Loopback1:
+    area: "0.0.0.0"

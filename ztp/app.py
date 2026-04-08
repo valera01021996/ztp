@@ -22,16 +22,22 @@ import os
 import re
 import ssl
 import json
+import sqlite3
+import difflib
+import logging
 import ipaddress
 import urllib.request
 import urllib.error
 from base64 import b64encode
+from datetime import datetime
 
 from jinja2 import Environment, FileSystemLoader
 
 import pynetbox
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import PlainTextResponse
+from fastapi import FastAPI, HTTPException, Request, Form
+from fastapi.responses import PlainTextResponse, HTMLResponse, RedirectResponse
+from fastapi.templating import Jinja2Templates
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
@@ -39,15 +45,73 @@ load_dotenv()
 
 app = FastAPI(title="ZTP Server")
 
+UI_TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "templates", "ui")
+ui_templates = Jinja2Templates(directory=UI_TEMPLATES_DIR)
+
+DB_PATH = os.path.join(os.path.dirname(__file__), "pipeline.db")
+
+def _db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def _init_db():
+    with _db() as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS pipeline_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                device_name TEXT NOT NULL,
+                device_serial TEXT,
+                platform TEXT,
+                status TEXT DEFAULT 'pending',
+                generated_config TEXT,
+                current_config TEXT,
+                diff TEXT,
+                error TEXT,
+                created_at TEXT DEFAULT (datetime('now', 'localtime')),
+                updated_at TEXT DEFAULT (datetime('now', 'localtime'))
+            )
+        """)
+        conn.commit()
+
+_init_db()
+
 NETBOX_URL      = os.environ["NETBOX_URL"]
 NETBOX_TOKEN    = os.environ["NETBOX_TOKEN"]
 ADMIN_PASSWORD  = os.environ.get("ADMIN_PASSWORD", "123456")
 SWITCH_USER     = os.environ.get("SWITCH_USER", "admin")
 SWITCH_PASSWORD = os.environ.get("SWITCH_PASSWORD", ADMIN_PASSWORD)
 
+GITLAB_TEMPLATES_URL = os.environ.get("GITLAB_TEMPLATES_URL", "")
+
 ZTP_SCRIPT_PATH     = os.path.join(os.path.dirname(__file__), "ztp_script.py")
 H3C_ZTP_SCRIPT_PATH = os.path.join(os.path.dirname(__file__), "h3c_ztp_script.py")
 TEMPLATES_DIR       = os.path.join(os.path.dirname(__file__), "templates")
+TEMPLATES_REPO_DIR  = os.path.join(os.path.dirname(__file__), "templates_repo")
+
+
+def _sync_templates() -> str:
+    """Clone or pull templates from GitLab. Returns status message."""
+    if not GITLAB_TEMPLATES_URL:
+        return "GITLAB_TEMPLATES_URL not set, using local templates"
+    try:
+        from git import Repo, InvalidGitRepositoryError
+        if os.path.exists(os.path.join(TEMPLATES_REPO_DIR, ".git")):
+            repo = Repo(TEMPLATES_REPO_DIR)
+            repo.remotes.origin.pull()
+            msg = "Templates pulled from GitLab"
+        else:
+            os.makedirs(TEMPLATES_REPO_DIR, exist_ok=True)
+            Repo.clone_from(GITLAB_TEMPLATES_URL, TEMPLATES_REPO_DIR)
+            msg = "Templates cloned from GitLab"
+        # Reload jinja env from new templates
+        global _jinja_env
+        _jinja_env = _make_jinja_env(TEMPLATES_REPO_DIR)
+        logging.info(msg)
+        return msg
+    except Exception as e:
+        logging.warning("Template sync failed: %s — using local templates", e)
+        return f"sync failed: {e}"
 
 # (role_slug, platform_slug) → template file (relative to TEMPLATES_DIR)
 ROLE_TEMPLATES = {
@@ -68,12 +132,21 @@ def _cidr_to_mask(cidr: str) -> str:
     iface = ipaddress.ip_interface(cidr)
     return f"{iface.ip} {iface.netmask}"
 
-_jinja_env = Environment(
-    loader=FileSystemLoader(TEMPLATES_DIR),
-    trim_blocks=True,
-    lstrip_blocks=True,
-    keep_trailing_newline=True,
-)
+def _make_jinja_env(templates_dir: str) -> Environment:
+    env = Environment(
+        loader=FileSystemLoader(templates_dir),
+        trim_blocks=True,
+        lstrip_blocks=True,
+        keep_trailing_newline=True,
+    )
+    env.filters["cidr_to_mask"]  = _cidr_to_mask
+    env.filters["comware_iface"] = _comware_iface_name
+    env.tests["match"]      = lambda value, pattern: bool(re.match(pattern, str(value)))
+    env.tests["vlan_iface"] = lambda value: bool(
+        re.match(r'^[Vv][Ll][Aa][Nn]\s*\d+$', str(value).strip())
+    )
+    return env
+
 def _comware_iface_name(name: str) -> str:
     """Vlan10 / VLAN10 / Vlan 10  →  Vlan-interface10 (H3C Comware naming)."""
     m = re.match(r'^[Vv][Ll][Aa][Nn]\s*(\d+)$', name.strip())
@@ -81,12 +154,10 @@ def _comware_iface_name(name: str) -> str:
         return "Vlan-interface" + m.group(1)
     return name
 
-_jinja_env.filters["cidr_to_mask"]  = _cidr_to_mask
-_jinja_env.filters["comware_iface"] = _comware_iface_name
-_jinja_env.tests["match"]      = lambda value, pattern: bool(re.match(pattern, str(value)))
-_jinja_env.tests["vlan_iface"] = lambda value: bool(
-    re.match(r'^[Vv][Ll][Aa][Nn]\s*\d+$', str(value).strip())
-)
+_jinja_env = _make_jinja_env(TEMPLATES_DIR)
+
+# Sync templates from GitLab on startup (if configured)
+_sync_templates()
 
 
 def get_nb():
@@ -332,7 +403,72 @@ def get_config(serial: str):
     device = nb.dcim.devices.get(serial=serial)
     if not device:
         raise HTTPException(status_code=404, detail=f"serial={serial} не найден в NetBox")
-    return build_eos_startup_config(nb, device)
+    return build_eos_startup_config(nb, device, day0_only=True)
+
+
+@app.post("/webhooks/netbox")
+async def netbox_webhook(request: Request):
+    """NetBox webhook — создаёт Pipeline Run при изменении устройства/интерфейса/VLAN."""
+    body = await request.json()
+    event = body.get("event", "")
+    model = body.get("model", "")
+    data  = body.get("data", {})
+    logging.info("NetBox webhook payload: event=%s model=%s data_keys=%s device_field=%s",
+                 event, model, list(data.keys()), data.get("device"))
+
+    # Определяем имя устройства из payload
+    device_name = None
+    if model == "device":
+        device_name = data.get("name")
+    elif model in ("interface", "ip-address"):
+        device_name = (data.get("device") or {}).get("name")
+    elif model == "vlan":
+        # VLAN изменился — пересчитываем все устройства на этом сайте
+        logging.info("NetBox webhook: VLAN change, skipping auto-run")
+        return {"status": "skipped", "reason": "vlan change — trigger manually"}
+
+    if not device_name:
+        return {"status": "skipped", "reason": "cannot determine device"}
+
+    # Генерируем конфиг и создаём Pipeline Run
+    nb = get_nb()
+    device = get_device_by_name(nb, device_name)
+    platform = get_platform(device)
+    generated = None
+    error = None
+    try:
+        generated = build_eos_startup_config(nb, device)
+    except Exception as e:
+        error = str(e)
+
+    current = _get_current_config(device)
+    diff = _make_diff(current, generated) if generated else ""
+
+    with _db() as conn:
+        cur = conn.execute(
+            """INSERT INTO pipeline_runs
+               (device_name, device_serial, platform, status, generated_config, current_config, diff, error)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (device_name, device.serial or "", platform,
+             "pending" if not error else "failed",
+             generated, current, diff, error)
+        )
+        run_id = cur.lastrowid
+        conn.commit()
+
+    logging.info("NetBox webhook: event=%s model=%s device=%s run_id=%s", event, model, device_name, run_id)
+    return {"status": "ok", "device": device_name, "run_id": run_id}
+
+
+@app.post("/webhooks/gitlab")
+async def gitlab_webhook(request: Request):
+    """GitLab webhook — pull latest templates on push."""
+    body = await request.json()
+    ref = body.get("ref", "")
+    project = body.get("project", {}).get("path_with_namespace", "")
+    msg = _sync_templates()
+    logging.info("GitLab webhook: ref=%s project=%s sync=%s", ref, project, msg)
+    return {"status": "ok", "sync": msg}
 
 
 @app.get("/ztp-done/{serial}")
@@ -547,13 +683,19 @@ def _iface_to_dict(iface) -> dict:
     }
 
 
-def build_eos_startup_config(nb, device) -> str:
-    role_slug     = device.role.slug     if device.role     else ""
+def build_eos_startup_config(nb, device, day0_only: bool = False) -> str:
     platform_slug = device.platform.slug if device.platform else "eos"
-    template_name = ROLE_TEMPLATES.get(
-        (role_slug, platform_slug),
-        DEFAULT_TEMPLATES.get(platform_slug, "eos/default.j2"),
-    )
+
+    if day0_only:
+        # ZTP Day0 — только base шаблон: hostname, mgmt IP, user, SSH/Telnet
+        base_templates = {"eos": "eos/base.j2", "comware": "comware/base.j2"}
+        template_name = base_templates.get(platform_slug, "eos/base.j2")
+    else:
+        role_slug     = device.role.slug if device.role else ""
+        template_name = ROLE_TEMPLATES.get(
+            (role_slug, platform_slug),
+            DEFAULT_TEMPLATES.get(platform_slug, "eos/default.j2"),
+        )
     template = _jinja_env.get_template(template_name)
 
     # ── Management interface / primary IP ────────────────────────────────────
@@ -702,3 +844,354 @@ def _get_or_create_tag(nb, slug: str, name: str, color: str = "00bcd4"):
     if not tag:
         tag = nb.extras.tags.create({"name": name, "slug": slug, "color": color})
     return tag
+
+
+# ─── UI ───────────────────────────────────────────────────────────────────────
+
+def _device_creds(device) -> dict:
+    if not device.primary_ip4:
+        raise HTTPException(status_code=400, detail=f"У устройства {device.name} не задан primary_ip4")
+    return {
+        "ip": str(device.primary_ip4).split("/")[0],
+        "username": SWITCH_USER,
+        "password": SWITCH_PASSWORD,
+    }
+
+
+def _get_current_config(device) -> str:
+    """Получить текущий running-config с устройства."""
+    platform = get_platform(device)
+    try:
+        if platform == "eos":
+            result = get_eapi(device).run(["enable", "show running-config"])
+            return result[-1].get("output", "")
+        elif platform == "comware":
+            import paramiko, time
+            creds = _device_creds(device)
+            client = paramiko.SSHClient()
+            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            client.connect(creds["ip"], username=creds["username"],
+                           password=creds["password"], timeout=10)
+            shell = client.invoke_shell()
+            time.sleep(1)
+            out = shell.recv(4096).decode("utf-8", errors="ignore")
+            if "change" in out.lower():
+                shell.send("n\n"); time.sleep(0.5); shell.recv(1024)
+            shell.send("screen-length disable\n"); time.sleep(0.5); shell.recv(1024)
+            shell.send("display current-configuration\n"); time.sleep(3)
+            output = ""
+            while shell.recv_ready():
+                output += shell.recv(65536).decode("utf-8", errors="ignore")
+                time.sleep(0.3)
+            client.close()
+            return output
+    except Exception as e:
+        return f"# Could not connect to device: {e}"
+    return ""
+
+
+def _make_diff(current: str, generated: str) -> str:
+    a = (current or "").splitlines(keepends=True)
+    b = (generated or "").splitlines(keepends=True)
+    return "".join(difflib.unified_diff(a, b, fromfile="current", tofile="generated", lineterm="\n"))
+
+
+@app.get("/ui", response_class=HTMLResponse)
+def ui_dashboard(request: Request):
+    with _db() as conn:
+        runs = conn.execute(
+            "SELECT * FROM pipeline_runs ORDER BY id DESC LIMIT 100"
+        ).fetchall()
+    return ui_templates.TemplateResponse("dashboard.html", {
+        "request": request, "runs": runs, "active": "dashboard"
+    })
+
+
+NETWORK_ROLE_SLUGS = {"leaf", "spine", "data-sw", "oam", "access", "distribution", "core", "router"}
+
+@app.get("/ui/devices", response_class=HTMLResponse)
+def ui_devices(request: Request):
+    nb = get_nb()
+    all_roles = list(nb.dcim.device_roles.all())
+    # По умолчанию показываем только сетевые роли
+    selected_roles = request.query_params.getlist("role")
+    if not selected_roles:
+        selected_roles = [r.slug for r in all_roles if r.slug in NETWORK_ROLE_SLUGS]
+
+    if selected_roles:
+        devices = list(nb.dcim.devices.filter(role=selected_roles, status="active"))
+    else:
+        devices = list(nb.dcim.devices.filter(status="active"))
+
+    return ui_templates.TemplateResponse("devices.html", {
+        "request": request,
+        "devices": devices,
+        "roles": all_roles,
+        "selected_roles": selected_roles,
+        "active": "devices",
+    })
+
+
+@app.get("/ui/devices/{device_name}", response_class=HTMLResponse)
+def ui_device_manage(request: Request, device_name: str,
+                     error: str = None, success: str = None):
+    nb = get_nb()
+    device = get_device_by_name(nb, device_name)
+    site_id = device.site.id if device.site else None
+
+    vlans = []
+    try:
+        vlans = sorted(
+            list(nb.ipam.vlans.filter(site_id=site_id)),
+            key=lambda v: v.vid
+        )
+    except Exception:
+        pass
+
+    return ui_templates.TemplateResponse("device_manage.html", {
+        "request": request,
+        "device_name": device_name,
+        "platform": get_platform(device),
+        "role": (getattr(device, 'role', None) or getattr(device, 'device_role', None) or type('', (), {'name': '—'})()).name,
+        "primary_ip": str(device.primary_ip4).split("/")[0] if device.primary_ip4 else "—",
+        "vlans": vlans,
+        "error": error,
+        "success": success,
+        "active": "devices",
+    })
+
+
+@app.post("/ui/devices/{device_name}/vlans")
+def ui_add_vlan(device_name: str, vid: int = Form(...), name: str = Form("")):
+    try:
+        nb = get_nb()
+        device = get_device_by_name(nb, device_name)
+        site_id = device.site.id if device.site else None
+        platform = get_platform(device)
+
+        existing = nb.ipam.vlans.get(vid=vid, site_id=site_id)
+        if not existing:
+            vlan_data = {"vid": vid, "name": name or f"VLAN{vid}"}
+            if site_id:
+                vlan_data["site"] = site_id
+            nb.ipam.vlans.create(vlan_data)
+
+        if platform == "comware":
+            get_h3c(device).add_vlan(vid, name or f"VLAN{vid}")
+        else:
+            get_eapi(device).run([
+                "enable", "configure",
+                f"vlan {vid}",
+                f"name {name or f'VLAN{vid}'}",
+            ])
+
+        return RedirectResponse(f"/ui/devices/{device_name}?success=VLAN+{vid}+added", status_code=303)
+    except Exception as e:
+        return RedirectResponse(f"/ui/devices/{device_name}?error={str(e)[:120]}", status_code=303)
+
+
+@app.post("/ui/devices/{device_name}/vlans/{vid}/delete")
+def ui_delete_vlan(device_name: str, vid: int):
+    try:
+        nb = get_nb()
+        device = get_device_by_name(nb, device_name)
+        site_id = device.site.id if device.site else None
+        platform = get_platform(device)
+
+        vlan_obj = nb.ipam.vlans.get(vid=vid, site_id=site_id)
+        if vlan_obj:
+            vlan_obj.delete()
+
+        if platform == "comware":
+            get_h3c(device)._cli([f"undo vlan {vid}"])
+        else:
+            get_eapi(device).run(["enable", "configure", f"no vlan {vid}"])
+
+        return RedirectResponse(f"/ui/devices/{device_name}?success=VLAN+{vid}+deleted", status_code=303)
+    except Exception as e:
+        return RedirectResponse(f"/ui/devices/{device_name}?error={str(e)[:120]}", status_code=303)
+
+
+@app.post("/ui/devices/{device_name}/trunk")
+def ui_trunk(device_name: str, interface: str = Form(...), vlans: str = Form(...)):
+    try:
+        vlan_list = [int(v.strip()) for v in vlans.split(",") if v.strip()]
+        nb = get_nb()
+        device = get_device_by_name(nb, device_name)
+        site_id = device.site.id if device.site else None
+        platform = get_platform(device)
+
+        nb_iface = nb.dcim.interfaces.get(device_id=device.id, name=interface)
+        if not nb_iface:
+            nb_iface = nb.dcim.interfaces.create(device=device.id, name=interface, type="1000base-t")
+
+        current_vids = {v.id for v in (nb_iface.tagged_vlans or [])}
+        for vid in vlan_list:
+            vlan_obj = nb.ipam.vlans.get(vid=vid, site_id=site_id)
+            if vlan_obj:
+                current_vids.add(vlan_obj.id)
+        nb_iface.update({"mode": "tagged", "tagged_vlans": list(current_vids)})
+
+        if platform == "comware":
+            get_h3c(device).set_trunk_vlans(interface, vlan_list)
+        else:
+            vids_str = ",".join(str(v) for v in vlan_list)
+            get_eapi(device).run([
+                "enable", "configure",
+                f"interface {interface}",
+                "switchport mode trunk",
+                f"switchport trunk allowed vlan add {vids_str}",
+            ])
+
+        return RedirectResponse(f"/ui/devices/{device_name}?success=Trunk+configured+on+{interface}", status_code=303)
+    except Exception as e:
+        return RedirectResponse(f"/ui/devices/{device_name}?error={str(e)[:120]}", status_code=303)
+
+
+@app.post("/ui/devices/{device_name}/access")
+def ui_access(device_name: str, interface: str = Form(...),
+              vlan: int = Form(...), description: str = Form("")):
+    try:
+        nb = get_nb()
+        device = get_device_by_name(nb, device_name)
+        site_id = device.site.id if device.site else None
+        platform = get_platform(device)
+
+        vlan_obj = nb.ipam.vlans.get(vid=vlan, site_id=site_id)
+        nb_iface = nb.dcim.interfaces.get(device_id=device.id, name=interface)
+        if not nb_iface:
+            nb_iface = nb.dcim.interfaces.create(device=device.id, name=interface, type="1000base-t")
+
+        update = {"mode": "access"}
+        if vlan_obj:
+            update["untagged_vlan"] = vlan_obj.id
+        if description:
+            update["description"] = description
+        nb_iface.update(update)
+
+        if platform == "comware":
+            get_h3c(device).set_access_vlan(interface, vlan, description)
+        else:
+            cmds = ["enable", "configure", f"interface {interface}",
+                    "switchport mode access", f"switchport access vlan {vlan}"]
+            if description:
+                cmds.append(f"description {description}")
+            get_eapi(device).run(cmds)
+
+        return RedirectResponse(f"/ui/devices/{device_name}?success=Access+port+{interface}+set+to+VLAN+{vlan}", status_code=303)
+    except Exception as e:
+        return RedirectResponse(f"/ui/devices/{device_name}?error={str(e)[:120]}", status_code=303)
+
+
+@app.post("/ui/generate/{device_name}")
+def ui_generate(device_name: str):
+    nb = get_nb()
+    device = get_device_by_name(nb, device_name)
+    platform = get_platform(device)
+
+    generated = ""
+    error = None
+    try:
+        generated = build_eos_startup_config(nb, device)
+    except Exception as e:
+        error = str(e)
+
+    current = _get_current_config(device)
+    diff = _make_diff(current, generated) if generated else ""
+
+    with _db() as conn:
+        cur = conn.execute(
+            """INSERT INTO pipeline_runs
+               (device_name, device_serial, platform, status, generated_config, current_config, diff, error)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (device_name, device.serial or "", platform,
+             "pending" if not error else "failed",
+             generated, current, diff, error)
+        )
+        run_id = cur.lastrowid
+        conn.commit()
+
+    return RedirectResponse(f"/ui/runs/{run_id}", status_code=303)
+
+
+@app.get("/ui/runs/{run_id}", response_class=HTMLResponse)
+def ui_run_detail(request: Request, run_id: int):
+    with _db() as conn:
+        run = conn.execute(
+            "SELECT * FROM pipeline_runs WHERE id = ?", (run_id,)
+        ).fetchone()
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return ui_templates.TemplateResponse("run_detail.html", {
+        "request": request, "run": run, "active": "dashboard"
+    })
+
+
+@app.post("/ui/runs/{run_id}/approve")
+def ui_approve(run_id: int):
+    with _db() as conn:
+        run = conn.execute("SELECT * FROM pipeline_runs WHERE id = ?", (run_id,)).fetchone()
+        if not run:
+            raise HTTPException(status_code=404, detail="Run not found")
+
+    nb = get_nb()
+    device = get_device_by_name(nb, run["device_name"])
+    platform = get_platform(device)
+    config = run["generated_config"]
+    error = None
+
+    try:
+        if platform == "eos":
+            get_eapi(device).run([
+                "enable", "configure",
+                "copy terminal: startup-config",
+            ])
+            # Применить через replace конфига
+            cmds = ["enable"]
+            for line in config.splitlines():
+                if line.strip() and not line.startswith("!"):
+                    cmds.append(line)
+            get_eapi(device).run(cmds)
+        elif platform == "comware":
+            import paramiko, time
+            creds = _device_creds(device)
+            client = paramiko.SSHClient()
+            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            client.connect(creds["ip"], username=creds["username"],
+                           password=creds["password"], timeout=15)
+            shell = client.invoke_shell()
+            time.sleep(1)
+            out = shell.recv(4096).decode("utf-8", errors="ignore")
+            if "change" in out.lower():
+                shell.send("n\n"); time.sleep(0.5); shell.recv(1024)
+            shell.send("system-view\n"); time.sleep(0.5)
+            for line in config.splitlines():
+                if line.strip() and not line.startswith("!"):
+                    shell.send(line + "\n"); time.sleep(0.1)
+            shell.send("return\n"); time.sleep(0.5)
+            shell.send("save force\n"); time.sleep(2)
+            client.close()
+        status = "deployed"
+    except Exception as e:
+        error = str(e)
+        status = "failed"
+
+    with _db() as conn:
+        conn.execute(
+            "UPDATE pipeline_runs SET status=?, error=?, updated_at=datetime('now','localtime') WHERE id=?",
+            (status, error, run_id)
+        )
+        conn.commit()
+
+    return RedirectResponse(f"/ui/runs/{run_id}", status_code=303)
+
+
+@app.post("/ui/runs/{run_id}/reject")
+def ui_reject(run_id: int):
+    with _db() as conn:
+        conn.execute(
+            "UPDATE pipeline_runs SET status='rejected', updated_at=datetime('now','localtime') WHERE id=?",
+            (run_id,)
+        )
+        conn.commit()
+    return RedirectResponse(f"/ui/runs/{run_id}", status_code=303)

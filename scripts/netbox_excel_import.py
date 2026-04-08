@@ -13,14 +13,21 @@ import re
 import ipaddress as _ipaddress
 from io import BytesIO
 
-from extras.scripts import Script, FileVar, BooleanVar
+try:
+    from netbox.scripts import Script, FileVar, BooleanVar  # NetBox 4.x
+except ImportError:
+    from extras.scripts import Script, FileVar, BooleanVar  # NetBox 3.x
 from django.contrib.contenttypes.models import ContentType
 
 from dcim.models import (
     Region, Site, Location, Rack,
-    Manufacturer, DeviceType, DeviceRole, Platform,
+    Manufacturer, DeviceType, Platform,
     Device, Interface,
 )
+try:
+    from dcim.models import Role as DeviceRole      # NetBox 4.x
+except ImportError:
+    from dcim.models import DeviceRole              # NetBox 3.x fallback
 from ipam.models import VLAN, VRF, RouteTarget, IPAddress, Prefix
 from tenancy.models import Tenant
 from extras.models import Tag
@@ -294,7 +301,7 @@ class ExcelImport(Script):
         default=False,
     )
 
-    def run(self, data, commit):
+    def run(self, data, commit=True):
         dry = data["dry_run"]
         if dry:
             self.log_warning("DRY RUN — изменений в базе не будет")
@@ -499,15 +506,18 @@ class ExcelImport(Script):
                 self.log_success(f"[DRY] Создал бы VLAN {vid} {vlan_name}")
                 continue
 
-            vlan, created = VLAN.objects.get_or_create(
-                vid=vid,
-                site=site,
-                defaults={"name": vlan_name, "status": status, "tenant": tenant},
-            )
-            if created:
-                self.log_success(f"Создан VLAN {vid}: {vlan_name}")
-            else:
-                self.log_info(f"VLAN уже существует: {vid} {vlan_name}")
+            try:
+                vlan, created = VLAN.objects.get_or_create(
+                    vid=vid,
+                    site=site,
+                    defaults={"name": vlan_name, "status": status, "tenant": tenant},
+                )
+                if created:
+                    self.log_success(f"Создан VLAN {vid}: {vlan_name}")
+                else:
+                    self.log_info(f"VLAN уже существует: {vid} {vlan_name}")
+            except Exception as e:
+                self.log_failure(f"Ошибка создания VLAN {vid} ({vlan_name}): {e}")
 
     # ── Interfaces ────────────────────────────────────────────────────────────
 
@@ -518,6 +528,9 @@ class ExcelImport(Script):
             return
 
         self.log_info(f"Лист Interfaces: {len(rows)} строк(и)")
+
+        # Первый проход — создаём все интерфейсы (LAG нужно создать раньше членов)
+        lag_members = []  # [(device_name, iface_name, lag_name), ...]
 
         for row in rows:
             device_name = str_val(cv(row, col_map, "DeviceName"))
@@ -534,6 +547,7 @@ class ExcelImport(Script):
             enabled      = bool_val(cv(row, col_map, "Enabled")) if cv(row, col_map, "Enabled") is not None else True
             mtu          = int_val(cv(row, col_map, "MTU"))
             vrf_name     = str_val(cv(row, col_map, "VRF"))
+            lag_name     = str_val(cv(row, col_map, "LAG"))
 
             tagged_vids = []
             if tagged_raw:
@@ -544,7 +558,8 @@ class ExcelImport(Script):
 
             if dry:
                 vrf_info = f" vrf={vrf_name}" if vrf_name else ""
-                self.log_success(f"[DRY] Создал бы Interface: {device_name} / {iface_name} mode={nb_mode}{vrf_info}")
+                lag_info = f" lag={lag_name}" if lag_name else ""
+                self.log_success(f"[DRY] Создал бы Interface: {device_name} / {iface_name} type={iface_type} mode={nb_mode}{vrf_info}{lag_info}")
                 continue
 
             device = Device.objects.filter(name=device_name).first()
@@ -555,7 +570,6 @@ class ExcelImport(Script):
             untagged_vlan = VLAN.objects.filter(vid=untagged_vid).first() if untagged_vid else None
             tagged_vlans  = list(VLAN.objects.filter(vid__in=tagged_vids)) if tagged_vids else []
 
-            # VRF — создаём если не существует
             vrf = None
             if vrf_name:
                 vrf, vrf_created = get_or_create_vrf(vrf_name)
@@ -581,7 +595,6 @@ class ExcelImport(Script):
             )
 
             if not created:
-                # Обновляем существующий
                 for k, v in defaults.items():
                     setattr(iface, k, v)
                 iface.save()
@@ -591,6 +604,32 @@ class ExcelImport(Script):
 
             if tagged_vlans:
                 iface.tagged_vlans.set(tagged_vlans)
+
+            # Запоминаем для второго прохода
+            if lag_name:
+                lag_members.append((device_name, iface_name, lag_name))
+
+        # Второй проход — привязываем члены к LAG
+        if lag_members:
+            self.log_info(f"Привязка LAG-членов: {len(lag_members)} интерфейс(ов)")
+            for device_name, iface_name, lag_name in lag_members:
+                device = Device.objects.filter(name=device_name).first()
+                if not device:
+                    continue
+                member = Interface.objects.filter(device=device, name=iface_name).first()
+                lag    = Interface.objects.filter(device=device, name=lag_name).first()
+                if not member:
+                    self.log_failure(f"Интерфейс не найден: {device_name} / {iface_name}")
+                    continue
+                if not lag:
+                    self.log_failure(f"LAG интерфейс не найден: {device_name} / {lag_name} — создайте его в Excel с Type=lag")
+                    continue
+                try:
+                    member.lag = lag
+                    member.save()
+                    self.log_success(f"Привязан {device_name} / {iface_name} → LAG {lag_name}")
+                except Exception as e:
+                    self.log_failure(f"Ошибка привязки {device_name} / {iface_name} → LAG {lag_name}: {e}")
 
     # ── IP Addresses ──────────────────────────────────────────────────────────
 

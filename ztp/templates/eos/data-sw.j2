@@ -7,12 +7,29 @@ vlan {{ vlan.vid }}
 {% endfor %}
 !
 {% endif %}
+{% if vrfs %}
+! === VRFs ===
+{% for vrf in vrfs %}
+vrf instance {{ vrf.name }}
+!
+ip routing vrf {{ vrf.name }}
+!
+{% endfor %}
+{% endif %}
 ! === Interfaces ===
 {% for iface in interfaces %}
 interface {{ iface.name }}
 {% if iface.description %}
    description {{ iface.description }}
 {% endif %}
+{% if iface.name | lower is match('vlan.*') %}
+{% if iface.vrf %}
+   vrf {{ iface.vrf }}
+{% endif %}
+{% if iface.ip_address %}
+   ip address virtual {{ iface.ip_address }}
+{% endif %}
+{% else %}
 {% if iface.mode == 'access' %}
    switchport mode access
 {% if iface.untagged_vlan %}
@@ -28,6 +45,7 @@ interface {{ iface.name }}
 {% endif %}
 {% if iface.mtu %}
    mtu {{ iface.mtu }}
+{% endif %}
 {% endif %}
    {{ 'no shutdown' if iface.enabled else 'shutdown' }}
 !

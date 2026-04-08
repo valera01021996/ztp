@@ -1,0 +1,457 @@
+vrfs:
+  - name: PROD
+    description: Production VRF
+
+vlans:
+  - vid: 10
+    name: MGMT
+
+  - vid: 20
+    name: SERVERS
+
+  - vid: 36
+    name: USERS
+
+  - vid: 4094
+    name: MLAG_PEER
+
+devices:
+  - name: Leaf-1
+    site: BKM
+    location: BKM_DC-1
+    role: leaf
+    device_type: DCS-7280SR-48C6-F
+    manufacturer: Arista
+    platform: eos
+    rack: BKM_RACK-01
+    position: 42
+    rackface: front
+    height: 1
+    status: active
+
+    interfaces:
+      - name: Ethernet1
+        type: 10gbase-t
+        enabled: true
+
+      - name: Ethernet2
+        type: 10gbase-t
+        enabled: true
+
+      - name: Ethernet3
+        type: 10gbase-t
+        enabled: true
+
+      - name: Ethernet4
+        type: 10gbase-t
+        enabled: true
+
+      - name: Ethernet5
+        type: 10gbase-t
+        enabled: true
+
+      - name: Ethernet6
+        type: 10gbase-t
+        enabled: true
+
+      - name: Ethernet7
+        type: 10gbase-t
+        enabled: true
+
+      - name: Ethernet8
+        type: 10gbase-t
+        enabled: true
+
+      - name: Ethernet9
+        type: 10gbase-t
+        enabled: true
+
+      - name: Ethernet10
+        type: 10gbase-t
+        enabled: true
+
+      - name: Ethernet11
+        type: 10gbase-t
+        enabled: true
+
+      - name: Ethernet12
+        type: 100gbase-x
+        enabled: true
+
+      - name: Ethernet13
+        type: 10gbase-t
+        enabled: true
+
+      - name: Ethernet14
+        type: 10gbase-t
+        enabled: true
+
+      - name: Ethernet15
+        type: 10gbase-t
+        enabled: true
+
+      - name: Ethernet16
+        type: 10gbase-t
+        enabled: true
+
+      - name: Ethernet17
+        type: 10gbase-t
+        enabled: true
+
+      - name: Ethernet18
+        type: 10gbase-t
+        enabled: true
+
+      - name: Ethernet19
+        type: 10gbase-t
+        enabled: true
+
+      - name: Ethernet20
+        type: 10gbase-t
+        enabled: true
+
+      - name: Ethernet21
+        type: 10gbase-t
+        enabled: true
+
+      - name: Ethernet22
+        type: 10gbase-t
+        enabled: true
+
+      - name: Ethernet23
+        type: 10gbase-t
+        enabled: true
+
+      - name: Ethernet24
+        type: 10gbase-t
+        enabled: true
+
+      - name: Ethernet25
+        type: 10gbase-t
+        enabled: true
+
+      - name: Ethernet26
+        type: 10gbase-t
+        enabled: true
+
+      - name: Ethernet49/1
+        type: 100gbase-x
+        ip: 10.0.254.5/30
+        description: Link_To_Spine1
+        enabled: true
+
+      - name: Ethernet50/1
+        type: 100gbase-x
+        ip: 10.0.254.29/30
+        description: Link_To_Spine2
+        enabled: true
+
+      - name: Ethernet54/1
+        type: 100gbase-x
+        description: For_MLAG
+        enabled: true
+
+      - name: Management1
+        type: 1000base-t
+        ip: 192.168.1.100/24
+        primary: true
+        description: Management
+
+      - name: Loopback0
+        type: virtual
+        ip: 1.1.1.1/32
+
+      - name: Loopback1
+        type: virtual
+        ip: 2.2.1.1/32
+
+      - name: Vlan4094
+        type: virtual
+        ip: 10.0.254.1/30
+        description: MLAG Peer-Link L3
+
+      - name: Vlan10
+        type: virtual
+        vrf: PROD
+        ip: 10.10.10.1/24
+        description: MGMT SVI
+
+      - name: Vlan20
+        type: virtual
+        vrf: PROD
+        ip: 10.20.20.1/24
+        description: SERVERS SVI
+
+    config_context:
+      # Только device-specific данные — остальное берётся из fabric.yml (Role: leaf)
+
+      mlag:
+        peer_address: 10.0.254.2      # IP Vlan4094 MLAG-партнёра
+
+      bgp:
+        asn: 65000
+        neighbors:
+          - ip: 1.1.1.201
+            remote_as: 65000
+            description: Spine-1
+            update_source: Loopback0
+            evpn: true
+          - ip: 1.1.1.202
+            remote_as: 65000
+            description: Spine-2
+            update_source: Loopback0
+            evpn: true
+
+      vxlan:
+        vlan_vnis:
+          - vlan: 20
+            vni: 10020
+          - vlan: 36
+            vni: 10036
+        flood_vteps:
+          - 2.2.1.2                   # Loopback1 MLAG-партнёра
+          - 2.2.2.1                   # Loopback1 Leaf-3
+          - 2.2.2.2                   # Loopback1 Leaf-4
+
+    port_channels:
+      - name: Port-Channel100
+        type: lag
+        mode: lacp
+        mtu: 9214
+        description: MLAG Peer-Link
+        members:
+          - Ethernet54/1
+
+      - name: Port-Channel1
+        type: lag
+        mode: lacp
+        mtu: 9214
+        description: SRV1
+        untagged_vlan: 20
+        members:
+          - Ethernet1
+
+      - name: Port-Channel2
+        type: lag
+        mode: lacp
+        mtu: 9214
+        description: SRV2
+        untagged_vlan: 20
+        members:
+          - Ethernet2
+
+      - name: Port-Channel3
+        type: lag
+        mode: lacp
+        mtu: 9214
+        description: SRV3
+        untagged_vlan: 20
+        members:
+          - Ethernet3
+
+      - name: Port-Channel4
+        type: lag
+        mode: lacp
+        mtu: 9214
+        description: SRV4
+        untagged_vlan: 20
+        members:
+          - Ethernet4
+
+      - name: Port-Channel5
+        type: lag
+        mode: lacp
+        mtu: 9214
+        description: SRV5
+        untagged_vlan: 20
+        members:
+          - Ethernet5
+
+      - name: Port-Channel6
+        type: lag
+        mode: lacp
+        mtu: 9214
+        description: SRV6
+        untagged_vlan: 20
+        members:
+          - Ethernet6
+
+      - name: Port-Channel7
+        type: lag
+        mode: lacp
+        mtu: 9214
+        description: SRV7
+        untagged_vlan: 20
+        members:
+          - Ethernet7
+
+      - name: Port-Channel8
+        type: lag
+        mode: lacp
+        mtu: 9214
+        description: SRV8
+        untagged_vlan: 20
+        members:
+          - Ethernet8
+
+      - name: Port-Channel9
+        type: lag
+        mode: lacp
+        mtu: 9214
+        description: SRV9
+        untagged_vlan: 20
+        members:
+          - Ethernet9
+
+      - name: Port-Channel10
+        type: lag
+        mode: lacp
+        mtu: 9214
+        description: SRV10
+        untagged_vlan: 20
+        members:
+          - Ethernet10
+
+      - name: Port-Channel11
+        type: lag
+        mode: lacp
+        mtu: 9214
+        description: SRV11
+        untagged_vlan: 20
+        members:
+          - Ethernet11
+
+      - name: Port-Channel12
+        type: lag
+        mode: lacp
+        mtu: 9214
+        description: SRV12
+        untagged_vlan: 20
+        members:
+          - Ethernet12
+
+      - name: Port-Channel13
+        type: lag
+        mode: lacp
+        mtu: 9214
+        description: SRV13
+        untagged_vlan: 20
+        members:
+          - Ethernet13
+
+      - name: Port-Channel14
+        type: lag
+        mode: lacp
+        mtu: 9214
+        description: SRV14
+        untagged_vlan: 20
+        members:
+          - Ethernet14
+
+      - name: Port-Channel15
+        type: lag
+        mode: lacp
+        mtu: 9214
+        description: SRV15
+        untagged_vlan: 20
+        members:
+          - Ethernet15
+
+      - name: Port-Channel16
+        type: lag
+        mode: lacp
+        mtu: 9214
+        description: SRV16
+        untagged_vlan: 20
+        members:
+          - Ethernet16
+
+      - name: Port-Channel17
+        type: lag
+        mode: lacp
+        mtu: 9214
+        description: SRV17
+        untagged_vlan: 20
+        members:
+          - Ethernet17
+
+      - name: Port-Channel18
+        type: lag
+        mode: lacp
+        mtu: 9214
+        description: SRV18
+        untagged_vlan: 20
+        members:
+          - Ethernet18
+
+      - name: Port-Channel19
+        type: lag
+        mode: lacp
+        mtu: 9214
+        description: SRV19
+        untagged_vlan: 20
+        members:
+          - Ethernet19
+
+      - name: Port-Channel20
+        type: lag
+        mode: lacp
+        mtu: 9214
+        description: SRV20
+        untagged_vlan: 20
+        members:
+          - Ethernet20
+
+      - name: Port-Channel21
+        type: lag
+        mode: lacp
+        mtu: 9214
+        description: SRV21
+        untagged_vlan: 20
+        members:
+          - Ethernet21
+
+      - name: Port-Channel22
+        type: lag
+        mode: lacp
+        mtu: 9214
+        description: SRV22
+        untagged_vlan: 20
+        members:
+          - Ethernet22
+
+      - name: Port-Channel23
+        type: lag
+        mode: lacp
+        mtu: 9214
+        description: SRV23
+        untagged_vlan: 20
+        members:
+          - Ethernet23
+
+      - name: Port-Channel24
+        type: lag
+        mode: lacp
+        mtu: 9214
+        description: SRV24
+        untagged_vlan: 20
+        members:
+          - Ethernet24
+
+      - name: Port-Channel25
+        type: lag
+        mode: lacp
+        mtu: 9214
+        description: SRV25
+        untagged_vlan: 20
+        members:
+          - Ethernet25
+
+      - name: Port-Channel26
+        type: lag
+        mode: lacp
+        mtu: 9214
+        description: SRV26
+        untagged_vlan: 20
+        members:
+          - Ethernet26

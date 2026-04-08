@@ -1,0 +1,31 @@
+# Device-level config context для Leaf-1
+# NetBox: Extras → Config Contexts → назначить на Device: Leaf-1
+# Переопределяет / дополняет fabric.yml
+
+# ── MLAG (peer-specific) ─────────────────────────────────────────────────────
+mlag:
+  local_interface: Vlan4094
+  peer_address: 10.255.255.1   # IP MLAG-партнёра
+  peer_link: Port-Channel100
+
+# ── BGP neighbors (Spine) ────────────────────────────────────────────────────
+bgp:
+  neighbors:
+    - ip: 10.0.0.1
+      remote_as: 65000
+      description: Spine-1
+      update_source: Loopback0
+      evpn: true
+    - ip: 10.0.0.2
+      remote_as: 65000
+      description: Spine-2
+      update_source: Loopback0
+      evpn: true
+
+# ── VXLAN VNIs ───────────────────────────────────────────────────────────────
+vxlan:
+  vlan_vnis:
+    - vlan: 20
+      vni: 10020
+    - vlan: 36
+      vni: 10036

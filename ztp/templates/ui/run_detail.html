@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Run #{{ run.id }}{% endblock %}
+{% block content %}
+
+<div class="flex-between">
+    <div>
+        <h1>Pipeline Run #{{ run.id }} — {{ run.device_name }}</h1>
+        <span class="meta">{{ run.created_at }} &nbsp;|&nbsp; Platform: {{ run.platform or '—' }}</span>
+    </div>
+    <span class="badge badge-{{ run.status }}" style="font-size: 14px; padding: 6px 16px;">{{ run.status }}</span>
+</div>
+
+{% if run.error %}
+<div class="card" style="border-color: #7f1d1d;">
+    <h2 style="color: #f87171;">Error</h2>
+    <pre style="color: #fca5a5; font-size: 13px;">{{ run.error }}</pre>
+</div>
+{% endif %}
+
+{% if run.status == 'pending' %}
+<div class="card" style="border-color: #1e3a5f;">
+    <div class="flex">
+        <form method="post" action="/ui/runs/{{ run.id }}/approve">
+            <button type="submit" class="btn btn-success">Approve &amp; Deploy</button>
+        </form>
+        <form method="post" action="/ui/runs/{{ run.id }}/reject">
+            <button type="submit" class="btn btn-danger">Reject</button>
+        </form>
+    </div>
+</div>
+{% endif %}
+
+{% if run.diff %}
+<div class="card">
+    <h2>Diff (current → new)</h2>
+    <div class="diff-block">
+        <pre>{% for line in run.diff.splitlines() %}{% if line.startswith('+') and not line.startswith('+++') %}<span class="diff-add">{{ line }}</span>{% elif line.startswith('-') and not line.startswith('---') %}<span class="diff-del">{{ line }}</span>{% elif line.startswith('@@') %}<span class="diff-info">{{ line }}</span>{% else %}<span class="diff-ctx">{{ line }}</span>{% endif %}
+{% endfor %}</pre>
+    </div>
+</div>
+{% endif %}
+
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+    <div class="card">
+        <h2>Generated Config</h2>
+        <div class="config-block">
+            <pre>{{ run.generated_config or 'Not available' }}</pre>
+        </div>
+    </div>
+    <div class="card">
+        <h2>Current Config (on device)</h2>
+        <div class="config-block">
+            <pre>{{ run.current_config or 'Not available / device unreachable' }}</pre>
+        </div>
+    </div>
+</div>
+
+<div style="margin-top: 12px;">
+    <a href="/ui" class="btn btn-primary btn-sm">← Back</a>
+</div>
+{% endblock %}

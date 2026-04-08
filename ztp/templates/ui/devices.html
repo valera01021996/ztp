@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}Devices{% endblock %}
+{% block content %}
+<div class="flex-between">
+    <h1>Devices</h1>
+</div>
+
+<!-- Role filter -->
+<div class="card" style="padding: 16px 24px; margin-bottom: 20px;">
+    <form method="get" action="/ui/devices" style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+        <span style="color: #64748b; font-size: 13px; font-weight: 500;">Role:</span>
+        {% for role in roles %}
+        <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px; color: #cbd5e1;">
+            <input type="checkbox" name="role" value="{{ role.slug }}"
+                {% if role.slug in selected_roles %}checked{% endif %}
+                style="accent-color: #38bdf8; width: 14px; height: 14px;">
+            {{ role.name }}
+        </label>
+        {% endfor %}
+        <button type="submit" class="btn btn-primary btn-sm">Apply</button>
+        <a href="/ui/devices" class="btn btn-sm" style="background:#334155; color:#94a3b8;">Reset</a>
+    </form>
+</div>
+
+{% if devices %}
+<div class="card" style="padding: 0;">
+    <table>
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Role</th>
+                <th>Platform</th>
+                <th>Site</th>
+                <th>Primary IP</th>
+                <th>Serial</th>
+                <th>Status</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for d in devices %}
+            <tr>
+                <td><strong>{{ d.name }}</strong></td>
+                <td class="meta">{{ (d.role or d.device_role).name if (d.role or d.device_role) else '—' }}</td>
+                <td class="meta">{{ d.platform.name if d.platform else '—' }}</td>
+                <td class="meta">{{ d.site.name if d.site else '—' }}</td>
+                <td class="meta" style="font-family: monospace; font-size: 12px;">
+                    {{ d.primary_ip4 | string | replace('/32','') if d.primary_ip4 else '—' }}
+                </td>
+                <td class="meta" style="font-family: monospace; font-size: 12px;">{{ d.serial or '—' }}</td>
+                <td>
+                    <span class="badge badge-{% if d.status.value == 'active' %}approved{% else %}pending{% endif %}">
+                        {{ d.status.label if d.status else '—' }}
+                    </span>
+                </td>
+                <td style="display: flex; gap: 8px; flex-wrap: wrap;">
+                    <a href="/ui/devices/{{ d.name }}" class="btn btn-primary btn-sm">Manage</a>
+                    <form method="post" action="/ui/generate/{{ d.name }}" style="display:inline;">
+                        <button type="submit" class="btn btn-sm" style="background:#1e3a5f; color:#38bdf8;">Generate Config</button>
+                    </form>
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="card">
+    <div class="empty">No devices found. Try changing the role filter.</div>
+</div>
+{% endif %}
+{% endblock %}
