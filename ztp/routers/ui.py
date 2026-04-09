@@ -52,16 +52,23 @@ def ui_device_manage(request: Request, device_name: str,
                      error: str = None, success: str = None):
     nb = get_nb()
     device = get_device_by_name(nb, device_name)
-    # Collect VLANs actually used on this device's interfaces
+    # Collect VLANs with interface assignments
     vlans = []
     try:
-        vid_set: dict[int, str] = {}
+        # vid -> {name, interfaces: [{name, mode}]}
+        vid_map: dict[int, dict] = {}
         for iface in nb.dcim.interfaces.filter(device_id=device.id):
             if iface.untagged_vlan:
-                vid_set[iface.untagged_vlan.vid] = iface.untagged_vlan.name
+                v = iface.untagged_vlan
+                vid_map.setdefault(v.vid, {"name": v.name, "interfaces": []})
+                vid_map[v.vid]["interfaces"].append({"name": iface.name, "mode": "access"})
             for v in (iface.tagged_vlans or []):
-                vid_set[v.vid] = v.name
-        vlans = [{"vid": vid, "name": name} for vid, name in sorted(vid_set.items())]
+                vid_map.setdefault(v.vid, {"name": v.name, "interfaces": []})
+                vid_map[v.vid]["interfaces"].append({"name": iface.name, "mode": "trunk"})
+        vlans = [
+            {"vid": vid, "name": d["name"], "interfaces": d["interfaces"]}
+            for vid, d in sorted(vid_map.items())
+        ]
     except Exception:
         pass
 
@@ -104,23 +111,55 @@ def ui_add_vlan(device_name: str, vid: int = Form(...), name: str = Form("")):
         return RedirectResponse(f"/ui/devices/{device_name}?error={str(e)[:120]}", status_code=303)
 
 
-@router.post("/ui/devices/{device_name}/vlans/{vid}/delete")
-def ui_delete_vlan(device_name: str, vid: int):
+@router.post("/ui/devices/{device_name}/vlans/{vid}/delete_global")
+def ui_delete_vlan_global(device_name: str, vid: int):
+    """Delete VLAN globally from switch only — does not touch NetBox."""
     try:
         nb = get_nb()
         device = get_device_by_name(nb, device_name)
         platform = get_platform(device)
-
-        vlan_obj = next(iter(nb.ipam.vlans.filter(vid=vid)), None)
-        if vlan_obj:
-            vlan_obj.delete()
 
         if platform == "comware":
             get_h3c(device)._cli([f"undo vlan {vid}"])
         else:
             get_eapi(device).run(["enable", "configure", f"no vlan {vid}"])
 
-        return RedirectResponse(f"/ui/devices/{device_name}?success=VLAN+{vid}+deleted", status_code=303)
+        return RedirectResponse(f"/ui/devices/{device_name}?success=VLAN+{vid}+removed+from+switch", status_code=303)
+    except Exception as e:
+        return RedirectResponse(f"/ui/devices/{device_name}?error={str(e)[:120]}", status_code=303)
+
+
+@router.post("/ui/devices/{device_name}/vlans/{vid}/remove_from_port")
+def ui_remove_vlan_from_port(device_name: str, vid: int, interface: str = Form(...)):
+    """Remove VLAN from a specific interface — updates both switch and NetBox."""
+    try:
+        nb = get_nb()
+        device = get_device_by_name(nb, device_name)
+        platform = get_platform(device)
+
+        # Update NetBox interface
+        nb_iface = nb.dcim.interfaces.get(device_id=device.id, name=interface)
+        if nb_iface:
+            if nb_iface.untagged_vlan and nb_iface.untagged_vlan.vid == vid:
+                nb_iface.update({"untagged_vlan": None, "mode": None})
+            else:
+                new_tagged = [v.id for v in (nb_iface.tagged_vlans or []) if v.vid != vid]
+                nb_iface.update({"tagged_vlans": new_tagged})
+
+        # Update switch
+        if platform == "comware":
+            get_h3c(device)._cli([
+                f"interface {interface}",
+                f"undo port trunk permit vlan {vid}",
+            ])
+        else:
+            get_eapi(device).run([
+                "enable", "configure",
+                f"interface {interface}",
+                f"switchport trunk allowed vlan remove {vid}",
+            ])
+
+        return RedirectResponse(f"/ui/devices/{device_name}?success=VLAN+{vid}+removed+from+{interface}", status_code=303)
     except Exception as e:
         return RedirectResponse(f"/ui/devices/{device_name}?error={str(e)[:120]}", status_code=303)
 

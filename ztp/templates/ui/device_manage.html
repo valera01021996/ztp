@@ -64,26 +64,47 @@
                 <tr>
                     <th>VID</th>
                     <th>Name</th>
-                    <th></th>
+                    <th>Interface</th>
+                    <th>Actions</th>
                 </tr>
             </thead>
             <tbody>
             {% for v in vlans %}
+                {% for iface in v.interfaces %}
                 <tr>
-                    <td class="mono">{{ v.vid }}</td>
-                    <td>{{ v.name }}</td>
-                    <td style="text-align:right;">
-                        <form method="post" action="/ui/devices/{{ device_name }}/vlans/{{ v.vid }}/delete">
-                            <button type="submit" class="btn btn-danger btn-sm"
-                                onclick="return confirm('Delete VLAN {{ v.vid }}?')">Delete</button>
+                    {% if loop.first %}
+                    <td class="mono" rowspan="{{ v.interfaces | length }}">{{ v.vid }}</td>
+                    <td rowspan="{{ v.interfaces | length }}">{{ v.name }}</td>
+                    {% endif %}
+                    <td>
+                        <span class="mono" style="font-size:11px;">{{ iface.name }}</span>
+                        <span class="meta" style="font-size:10px; margin-left:4px;">{{ iface.mode }}</span>
+                    </td>
+                    <td style="white-space:nowrap;">
+                        <form method="post" action="/ui/devices/{{ device_name }}/vlans/{{ v.vid }}/remove_from_port"
+                              style="display:inline;"
+                              onsubmit="return confirm('Remove VLAN {{ v.vid }} from {{ iface.name }}?')">
+                            <input type="hidden" name="interface" value="{{ iface.name }}">
+                            <button type="submit" class="btn btn-sm"
+                                style="background:rgba(245,158,11,0.12); color:#f59e0b; border:1px solid rgba(245,158,11,0.2);">
+                                − Port
+                            </button>
                         </form>
+                        {% if loop.first %}
+                        <form method="post" action="/ui/devices/{{ device_name }}/vlans/{{ v.vid }}/delete_global"
+                              style="display:inline;"
+                              onsubmit="return confirm('Delete VLAN {{ v.vid }} globally from switch?')">
+                            <button type="submit" class="btn btn-danger btn-sm">− Switch</button>
+                        </form>
+                        {% endif %}
                     </td>
                 </tr>
+                {% endfor %}
             {% endfor %}
             </tbody>
         </table>
         {% else %}
-        <p class="meta" style="margin-bottom: 20px;">No VLANs found.</p>
+        <p class="meta" style="margin-bottom: 20px;">No VLANs assigned to interfaces.</p>
         {% endif %}
 
         <div style="border-top: 1px solid var(--border); padding-top: 16px;">
