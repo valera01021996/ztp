@@ -310,6 +310,11 @@
             });
         });
     });
+
+    // Remove success/error query params from URL so refresh doesn't re-show them
+    if (window.location.search) {
+        history.replaceState({}, '', window.location.pathname);
+    }
 </script>
 </body>
 </html>
