@@ -58,7 +58,7 @@ def ui_device_manage(request: Request, device_name: str,
         # vid -> {name, interfaces: [{name, mode}]}
         vid_map: dict[int, dict] = {}
         for iface in nb.dcim.interfaces.filter(device_id=device.id):
-            if iface.untagged_vlan:
+            if iface.untagged_vlan and getattr(iface.untagged_vlan, 'vid', None):
                 v = iface.untagged_vlan
                 vid_map.setdefault(v.vid, {"name": v.name, "interfaces": []})
                 vid_map[v.vid]["interfaces"].append({"name": iface.name, "mode": "access"})

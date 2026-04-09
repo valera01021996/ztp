@@ -72,10 +72,8 @@
             {% for v in vlans %}
                 {% for iface in v.interfaces %}
                 <tr>
-                    {% if loop.first %}
-                    <td class="mono" rowspan="{{ v.interfaces | length }}">{{ v.vid }}</td>
-                    <td rowspan="{{ v.interfaces | length }}">{{ v.name }}</td>
-                    {% endif %}
+                    <td class="mono">{{ v.vid }}</td>
+                    <td>{{ v.name }}</td>
                     <td>
                         <span class="mono" style="font-size:11px;">{{ iface.name }}</span>
                         <span class="meta" style="font-size:10px; margin-left:4px;">{{ iface.mode }}</span>
@@ -90,13 +88,11 @@
                                 − Port
                             </button>
                         </form>
-                        {% if loop.first %}
                         <form method="post" action="/ui/devices/{{ device_name }}/vlans/{{ v.vid }}/delete_global"
                               style="display:inline;"
                               onsubmit="return confirm('Delete VLAN {{ v.vid }} globally from switch?')">
                             <button type="submit" class="btn btn-danger btn-sm">− Switch</button>
                         </form>
-                        {% endif %}
                     </td>
                 </tr>
                 {% endfor %}
