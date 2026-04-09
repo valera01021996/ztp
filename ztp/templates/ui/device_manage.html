@@ -8,11 +8,13 @@
         <span class="meta">{{ platform }} &nbsp;|&nbsp; {{ role }} &nbsp;|&nbsp; {{ primary_ip }}</span>
     </div>
     <div class="flex">
-        <form method="post" action="/ui/generate/{{ device_name }}">
+        <form method="post" action="/ui/generate/{{ device_name }}"
+              data-loading="Generating config, reading device state">
             <button type="submit" class="btn btn-primary btn-sm">Generate Config</button>
         </form>
         <form method="post" action="/ui/devices/{{ device_name }}/rollback"
-              onsubmit="return confirm('Откатить до Day0? Весь Day1 конфиг будет удалён.')">
+              data-loading="Rolling back to Day0 — replacing running config"
+              data-confirm="Откатить до Day0? Весь Day1 конфиг будет удалён.">
             <button type="submit" class="btn btn-danger btn-sm">↩ Rollback to Day0</button>
         </form>
         <a href="/ui/devices" class="btn btn-sm" style="background:#334155; color:#94a3b8;">← Back</a>

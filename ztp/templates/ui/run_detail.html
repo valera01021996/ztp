@@ -20,7 +20,9 @@
 {% if run.status == 'pending' %}
 <div class="card" style="border-color: #1e3a5f;">
     <div class="flex">
-        <form method="post" action="/ui/runs/{{ run.id }}/approve">
+        <form method="post" action="/ui/runs/{{ run.id }}/approve"
+              data-loading="Deploying configuration to device"
+              data-confirm="Deploy this config to {{ run.device_name }}?">
             <button type="submit" class="btn btn-success">Approve &amp; Deploy</button>
         </form>
         <form method="post" action="/ui/runs/{{ run.id }}/reject">
