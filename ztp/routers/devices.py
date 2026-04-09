@@ -176,7 +176,7 @@ def set_access_port(name: str, body: AccessIn):
 def rollback_to_day0(name: str):
     """Откатить до Day0 конфига (base.j2) — только hostname, mgmt, SSH, eAPI."""
     from builder import build_config
-    from pipeline import deploy_config
+    from pipeline import deploy_config_replace
 
     nb = get_nb()
     device = get_device_by_name(nb, name)
@@ -186,7 +186,7 @@ def rollback_to_day0(name: str):
         raise HTTPException(status_code=400, detail="Rollback поддерживается только для EOS")
 
     config = build_config(nb, device, day0_only=True)
-    deploy_config(device, config)
+    deploy_config_replace(device, config)
     return {"status": "ok", "device": name, "message": "Rolled back to Day0 config"}
 
 

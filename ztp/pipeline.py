@@ -79,6 +79,21 @@ def create_pipeline_run(device, platform: str, generated: str, current: str,
     return run_id
 
 
+def deploy_config_replace(device, config: str):
+    """
+    Полная замена running-config через 'configure replace terminal:'.
+    Используется для rollback — удаляет весь Day1 конфиг и применяет новый.
+    """
+    platform = get_platform(device)
+    if platform != "eos":
+        raise HTTPException(status_code=400, detail="configure replace поддерживается только для EOS")
+    get_eapi(device).run([
+        "enable",
+        {"cmd": "configure replace terminal:", "input": config},
+        "write memory",
+    ], fmt="text")
+
+
 def deploy_config(device, config: str):
     platform = get_platform(device)
     if platform == "eos":

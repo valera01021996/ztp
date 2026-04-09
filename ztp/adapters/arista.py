@@ -15,11 +15,11 @@ class AristaEAPI:
             "Authorization": f"Basic {creds}",
         }
 
-    def run(self, commands: list) -> list:
+    def run(self, commands: list, fmt: str = "json") -> list:
         payload = json.dumps({
             "jsonrpc": "2.0",
             "method": "runCmds",
-            "params": {"version": 1, "cmds": commands, "format": "json"},
+            "params": {"version": 1, "cmds": commands, "format": fmt},
             "id": 1,
         }).encode()
 

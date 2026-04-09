@@ -265,12 +265,12 @@ def ui_approve(run_id: int):
 @router.post("/ui/devices/{device_name}/rollback")
 def ui_rollback(device_name: str):
     from builder import build_config
-    from pipeline import deploy_config
+    from pipeline import deploy_config_replace
     try:
         nb = get_nb()
         device = get_device_by_name(nb, device_name)
         config = build_config(nb, device, day0_only=True)
-        deploy_config(device, config)
+        deploy_config_replace(device, config)
         return RedirectResponse(f"/ui/devices/{device_name}?success=Rollback+to+Day0+complete", status_code=303)
     except Exception as e:
         return RedirectResponse(f"/ui/devices/{device_name}?error={str(e)[:120]}", status_code=303)
