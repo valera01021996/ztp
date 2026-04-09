@@ -82,10 +82,13 @@ def create_pipeline_run(device, platform: str, generated: str, current: str,
 def deploy_config(device, config: str):
     platform = get_platform(device)
     if platform == "eos":
-        cmds = ["enable"]
+        cmds = ["enable", "configure terminal"]
         for line in config.splitlines():
-            if line.strip() and not line.startswith("!"):
-                cmds.append(line)
+            stripped = line.strip()
+            if stripped and not stripped.startswith("!"):
+                cmds.append(stripped)
+        cmds.append("end")
+        cmds.append("write memory")
         get_eapi(device).run(cmds)
     elif platform == "comware":
         import paramiko, time
