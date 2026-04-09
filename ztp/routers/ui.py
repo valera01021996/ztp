@@ -115,6 +115,26 @@ def ui_device_manage(request: Request, device_name: str,
     except Exception:
         pass
 
+    # Fetch OSPF interface state from switch
+    platform = get_platform(device)
+    ospf_ifaces: dict[str, dict] = {}
+    try:
+        if platform == "eos":
+            result = get_eapi(device).run(["enable", "show ip ospf interface"])
+            for iface_name, data in result[1].get("interfaces", {}).items():
+                ospf_ifaces[iface_name] = {
+                    "area":         data.get("area", ""),
+                    "network_type": data.get("networkType", ""),
+                    "state":        data.get("interfaceState", ""),
+                    "up":           data.get("ospfEnabled", False) and data.get("interfaceState", "") not in ("", "down"),
+                }
+    except Exception:
+        pass
+
+    # Merge OSPF data into interfaces
+    for iface in interfaces:
+        iface["ospf"] = ospf_ifaces.get(iface["name"])
+
     role_obj = getattr(device, 'role', None) or getattr(device, 'device_role', None)
     return ui_templates.TemplateResponse("device_manage.html", {
         "request":    request,
