@@ -1,8 +1,12 @@
 {% extends "base.html" %}
 {% block title %}Pipeline Runs{% endblock %}
 {% block content %}
+
 <div class="flex-between">
     <h1>Pipeline Runs</h1>
+    {% if runs %}
+    <span class="meta">{{ runs | length }} run{{ 's' if runs | length != 1 }}</span>
+    {% endif %}
 </div>
 
 {% if runs %}
@@ -15,19 +19,19 @@
                 <th>Platform</th>
                 <th>Status</th>
                 <th>Created</th>
-                <th>Actions</th>
+                <th></th>
             </tr>
         </thead>
         <tbody>
         {% for run in runs %}
             <tr>
-                <td style="color:#475569;">{{ run.id }}</td>
-                <td><strong>{{ run.device_name }}</strong></td>
+                <td class="mono" style="color: var(--text3);">{{ run.id }}</td>
+                <td><strong style="color: var(--text);">{{ run.device_name }}</strong></td>
                 <td><span class="meta">{{ run.platform or '—' }}</span></td>
                 <td><span class="badge badge-{{ run.status }}">{{ run.status }}</span></td>
                 <td class="meta">{{ run.created_at }}</td>
-                <td>
-                    <a href="/ui/runs/{{ run.id }}" class="btn btn-primary btn-sm">View</a>
+                <td style="text-align:right;">
+                    <a href="/ui/runs/{{ run.id }}" class="btn btn-ghost btn-sm">View →</a>
                 </td>
             </tr>
         {% endfor %}
@@ -37,8 +41,9 @@
 {% else %}
 <div class="card">
     <div class="empty">
+        <div class="empty-icon">⬡</div>
         No pipeline runs yet.<br>
-        Go to <a href="/ui/devices" style="color:#38bdf8;">Devices</a> and generate a config.
+        <a href="/ui/devices" style="color: var(--accent);">Go to Devices</a> and generate a config.
     </div>
 </div>
 {% endif %}

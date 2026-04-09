@@ -4,41 +4,47 @@
 
 <div class="flex-between">
     <div>
-        <h1>Pipeline Run #{{ run.id }} — {{ run.device_name }}</h1>
-        <span class="meta">{{ run.created_at }} &nbsp;|&nbsp; Platform: {{ run.platform or '—' }}</span>
+        <h1>Run #{{ run.id }} — {{ run.device_name }}</h1>
+        <span class="meta">{{ run.created_at }} &nbsp;·&nbsp; {{ run.platform or '—' }}</span>
     </div>
-    <span class="badge badge-{{ run.status }}" style="font-size: 14px; padding: 6px 16px;">{{ run.status }}</span>
+    <span class="badge badge-{{ run.status }}" style="font-size: 13px; padding: 5px 14px;">{{ run.status }}</span>
 </div>
 
 {% if run.error %}
-<div class="card" style="border-color: #7f1d1d;">
-    <h2 style="color: #f87171;">Error</h2>
-    <pre style="color: #fca5a5; font-size: 13px;">{{ run.error }}</pre>
+<div class="card" style="border-color: var(--red);">
+    <div class="card-header" style="margin-bottom:0; padding-bottom:0; border:none;">
+        <h2 style="color: #f87171;">Error</h2>
+    </div>
+    <pre style="color: #fca5a5; font-size: 12px; font-family: 'JetBrains Mono', monospace; margin-top:12px; white-space:pre-wrap;">{{ run.error }}</pre>
 </div>
 {% endif %}
 
 {% if run.check_result %}
 {% set chk = run.check_result | tojson_load %}
-<div class="card" style="border-color: {% if chk.all_up %}#14532d{% elif chk.error %}#7f1d1d{% else %}#854d0e{% endif %};">
-    <h2>Post-Deploy Check
-        {% if chk.all_up %}<span style="color:#4ade80; font-weight:400; font-size:13px;">✓ All protocols up</span>
-        {% elif chk.error %}<span style="color:#f87171; font-weight:400; font-size:13px;">✗ Check failed</span>
-        {% else %}<span style="color:#fbbf24; font-weight:400; font-size:13px;">⚠ Some sessions down</span>
+<div class="card" style="border-color: {% if chk.all_up %}var(--green){% elif chk.error %}var(--red){% else %}var(--orange){% endif %};">
+    <div class="card-header">
+        <h2>Post-Deploy Check</h2>
+        {% if chk.all_up %}
+        <span style="color: var(--green); font-size: 13px;">✓ All protocols up</span>
+        {% elif chk.error %}
+        <span style="color: var(--red); font-size: 13px;">✗ Check failed</span>
+        {% else %}
+        <span style="color: var(--orange); font-size: 13px;">⚠ Some sessions down</span>
         {% endif %}
-    </h2>
+    </div>
     {% if chk.error %}
     <p style="color:#f87171; font-size:13px;">{{ chk.error }}</p>
     {% else %}
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:8px;">
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
         <div>
-            <p class="meta" style="margin-bottom:8px;">BGP Peers</p>
+            <p class="meta" style="margin-bottom: 8px;">BGP Peers</p>
             <table>
                 <thead><tr><th>Peer</th><th>State</th></tr></thead>
                 <tbody>
                 {% for p in chk.bgp %}
                 <tr>
-                    <td style="font-family:monospace;">{{ p.peer }}</td>
-                    <td style="color: {% if p.up %}#4ade80{% else %}#f87171{% endif %};">{{ p.state }}</td>
+                    <td class="mono">{{ p.peer }}</td>
+                    <td style="color: {% if p.up %}var(--green){% else %}var(--red){% endif %}; font-weight:600;">{{ p.state }}</td>
                 </tr>
                 {% else %}
                 <tr><td colspan="2" class="meta">No BGP peers</td></tr>
@@ -47,14 +53,14 @@
             </table>
         </div>
         <div>
-            <p class="meta" style="margin-bottom:8px;">OSPF Neighbors</p>
+            <p class="meta" style="margin-bottom: 8px;">OSPF Neighbors</p>
             <table>
                 <thead><tr><th>Neighbor</th><th>State</th></tr></thead>
                 <tbody>
                 {% for n in chk.ospf %}
                 <tr>
-                    <td style="font-family:monospace;">{{ n.neighbor }}</td>
-                    <td style="color: {% if n.up %}#4ade80{% else %}#f87171{% endif %};">{{ n.state }}</td>
+                    <td class="mono">{{ n.neighbor }}</td>
+                    <td style="color: {% if n.up %}var(--green){% else %}var(--red){% endif %}; font-weight:600;">{{ n.state }}</td>
                 </tr>
                 {% else %}
                 <tr><td colspan="2" class="meta">No OSPF neighbors</td></tr>
@@ -68,15 +74,15 @@
 {% endif %}
 
 {% if run.status == 'pending' %}
-<div class="card" style="border-color: #1e3a5f;">
+<div class="card" style="border-color: var(--border2);">
     <div class="flex">
         <form method="post" action="/ui/runs/{{ run.id }}/approve"
               data-loading="Deploying configuration to device"
               data-confirm="Deploy this config to {{ run.device_name }}?">
-            <button type="submit" class="btn btn-success">Approve &amp; Deploy</button>
+            <button type="submit" class="btn btn-success">✓ Approve &amp; Deploy</button>
         </form>
         <form method="post" action="/ui/runs/{{ run.id }}/reject">
-            <button type="submit" class="btn btn-danger">Reject</button>
+            <button type="submit" class="btn btn-danger">✕ Reject</button>
         </form>
     </div>
 </div>
@@ -84,7 +90,9 @@
 
 {% if run.diff %}
 <div class="card">
-    <h2>Diff (current → new)</h2>
+    <div class="card-header">
+        <h2>Diff (current → new)</h2>
+    </div>
     <div class="diff-block">
         <pre>{% for line in run.diff.splitlines() %}{% if line.startswith('+') and not line.startswith('+++') %}<span class="diff-add">{{ line }}</span>{% elif line.startswith('-') and not line.startswith('---') %}<span class="diff-del">{{ line }}</span>{% elif line.startswith('@@') %}<span class="diff-info">{{ line }}</span>{% else %}<span class="diff-ctx">{{ line }}</span>{% endif %}
 {% endfor %}</pre>
@@ -94,20 +102,25 @@
 
 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
     <div class="card">
-        <h2>Generated Config</h2>
+        <div class="card-header">
+            <h2>Generated Config</h2>
+        </div>
         <div class="config-block">
             <pre>{{ run.generated_config or 'Not available' }}</pre>
         </div>
     </div>
     <div class="card">
-        <h2>Current Config (on device)</h2>
+        <div class="card-header">
+            <h2>Current Config (on device)</h2>
+        </div>
         <div class="config-block">
             <pre>{{ run.current_config or 'Not available / device unreachable' }}</pre>
         </div>
     </div>
 </div>
 
-<div style="margin-top: 12px;">
-    <a href="/ui" class="btn btn-primary btn-sm">← Back</a>
+<div style="margin-top: 8px;">
+    <a href="/ui" class="btn btn-ghost btn-sm">← Back to Runs</a>
 </div>
+
 {% endblock %}

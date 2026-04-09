@@ -2,34 +2,50 @@
 {% block title %}{{ device_name }}{% endblock %}
 {% block content %}
 
+<style>
+    .form-input {
+        background: var(--surface2);
+        border: 1px solid var(--border2);
+        color: var(--text);
+        padding: 7px 12px;
+        border-radius: 6px;
+        font-size: 13px;
+        font-family: 'Inter', sans-serif;
+        outline: none;
+        transition: border-color 0.15s;
+    }
+    .form-input:focus { border-color: var(--accent); }
+    .form-input::placeholder { color: var(--text3); }
+</style>
+
 <div class="flex-between">
     <div>
         <h1>{{ device_name }}</h1>
-        <span class="meta">{{ platform }} &nbsp;|&nbsp; {{ role }} &nbsp;|&nbsp; {{ primary_ip }}</span>
+        <span class="meta">{{ platform }} &nbsp;·&nbsp; {{ role }} &nbsp;·&nbsp; {{ primary_ip }}</span>
     </div>
     <div class="flex">
         <form method="post" action="/ui/generate/{{ device_name }}"
               data-loading="Generating config, reading device state">
-            <button type="submit" class="btn btn-primary btn-sm">Generate Config</button>
+            <button type="submit" class="btn btn-primary btn-sm">⟳ Generate Config</button>
         </form>
         <form method="post" action="/ui/devices/{{ device_name }}/rollback"
               data-loading="Rolling back to Day0 — replacing running config"
               data-confirm="Откатить до Day0? Весь Day1 конфиг будет удалён.">
             <button type="submit" class="btn btn-danger btn-sm">↩ Rollback to Day0</button>
         </form>
-        <a href="/ui/devices" class="btn btn-sm" style="background:#334155; color:#94a3b8;">← Back</a>
+        <a href="/ui/devices" class="btn btn-ghost btn-sm">← Back</a>
     </div>
 </div>
 
 {% if error %}
-<div class="card" style="border-color: #7f1d1d; padding: 16px 24px;">
-    <span style="color: #f87171;">{{ error }}</span>
+<div class="card" style="border-color: var(--red); padding: 14px 20px;">
+    <span style="color: #f87171;">⚠ {{ error }}</span>
 </div>
 {% endif %}
 
 {% if success %}
-<div class="card" style="border-color: #14532d; padding: 16px 24px;">
-    <span style="color: #4ade80;">{{ success }}</span>
+<div class="card" style="border-color: var(--green); padding: 14px 20px;">
+    <span style="color: #4ade80;">✓ {{ success }}</span>
 </div>
 {% endif %}
 
@@ -37,9 +53,10 @@
 
     <!-- VLANs -->
     <div class="card">
-        <h2>VLANs</h2>
+        <div class="card-header">
+            <h2>VLANs</h2>
+        </div>
 
-        <!-- Список VLANов -->
         {% if vlans %}
         <table style="margin-bottom: 20px;">
             <thead>
@@ -52,9 +69,9 @@
             <tbody>
             {% for v in vlans %}
                 <tr>
-                    <td style="font-family: monospace;">{{ v.vid }}</td>
+                    <td class="mono">{{ v.vid }}</td>
                     <td>{{ v.name }}</td>
-                    <td>
+                    <td style="text-align:right;">
                         <form method="post" action="/ui/devices/{{ device_name }}/vlans/{{ v.vid }}/delete">
                             <button type="submit" class="btn btn-danger btn-sm"
                                 onclick="return confirm('Delete VLAN {{ v.vid }}?')">Delete</button>
@@ -68,31 +85,32 @@
         <p class="meta" style="margin-bottom: 20px;">No VLANs found.</p>
         {% endif %}
 
-        <!-- Добавить VLAN -->
-        <div style="border-top: 1px solid #334155; padding-top: 16px;">
-            <h2 style="margin-bottom: 12px;">Add VLAN</h2>
+        <div style="border-top: 1px solid var(--border); padding-top: 16px;">
+            <p style="color: var(--text2); font-size: 13px; font-weight: 500; margin-bottom: 10px;">Add VLAN</p>
             <form method="post" action="/ui/devices/{{ device_name }}/vlans" style="display: flex; gap: 8px; flex-wrap: wrap;">
                 <input type="number" name="vid" placeholder="VID (e.g. 100)" required min="1" max="4094"
-                    style="background:#0f172a; border:1px solid #334155; color:#e2e8f0; padding:7px 12px; border-radius:6px; font-size:13px; width:140px;">
+                    class="form-input" style="width: 130px;">
                 <input type="text" name="name" placeholder="Name (e.g. servers)"
-                    style="background:#0f172a; border:1px solid #334155; color:#e2e8f0; padding:7px 12px; border-radius:6px; font-size:13px; width:160px;">
-                <button type="submit" class="btn btn-success btn-sm">Add</button>
+                    class="form-input" style="width: 160px;">
+                <button type="submit" class="btn btn-success btn-sm">+ Add</button>
             </form>
         </div>
     </div>
 
     <!-- Port Configuration -->
-    <div>
+    <div style="display: flex; flex-direction: column; gap: 20px;">
 
         <!-- Trunk port -->
-        <div class="card" style="margin-bottom: 20px;">
-            <h2>Configure Trunk Port</h2>
+        <div class="card">
+            <div class="card-header">
+                <h2>Trunk Port</h2>
+            </div>
             <form method="post" action="/ui/devices/{{ device_name }}/trunk" style="display: flex; flex-direction: column; gap: 10px;">
                 <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
                     <input type="text" name="interface" placeholder="Interface (e.g. Ethernet1)" required
-                        style="background:#0f172a; border:1px solid #334155; color:#e2e8f0; padding:7px 12px; border-radius:6px; font-size:13px; flex: 1; min-width: 180px;">
+                        class="form-input" style="flex: 1; min-width: 180px;">
                     <input type="text" name="vlans" placeholder="VLANs (e.g. 10,20,30)" required
-                        style="background:#0f172a; border:1px solid #334155; color:#e2e8f0; padding:7px 12px; border-radius:6px; font-size:13px; flex: 1; min-width: 160px;">
+                        class="form-input" style="flex: 1; min-width: 150px;">
                     <button type="submit" class="btn btn-primary btn-sm">Apply</button>
                 </div>
                 <span class="meta">Добавит VLANы в trunk, обновит NetBox</span>
@@ -101,17 +119,19 @@
 
         <!-- Access port -->
         <div class="card">
-            <h2>Configure Access Port</h2>
+            <div class="card-header">
+                <h2>Access Port</h2>
+            </div>
             <form method="post" action="/ui/devices/{{ device_name }}/access" style="display: flex; flex-direction: column; gap: 10px;">
                 <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
                     <input type="text" name="interface" placeholder="Interface (e.g. Ethernet2)" required
-                        style="background:#0f172a; border:1px solid #334155; color:#e2e8f0; padding:7px 12px; border-radius:6px; font-size:13px; flex: 1; min-width: 180px;">
+                        class="form-input" style="flex: 1; min-width: 180px;">
                     <input type="number" name="vlan" placeholder="VLAN ID" required min="1" max="4094"
-                        style="background:#0f172a; border:1px solid #334155; color:#e2e8f0; padding:7px 12px; border-radius:6px; font-size:13px; width: 100px;">
+                        class="form-input" style="width: 100px;">
                     <button type="submit" class="btn btn-primary btn-sm">Apply</button>
                 </div>
                 <input type="text" name="description" placeholder="Description (optional)"
-                    style="background:#0f172a; border:1px solid #334155; color:#e2e8f0; padding:7px 12px; border-radius:6px; font-size:13px;">
+                    class="form-input">
                 <span class="meta">Настроит access порт, обновит NetBox</span>
             </form>
         </div>
