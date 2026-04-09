@@ -52,11 +52,16 @@ def ui_device_manage(request: Request, device_name: str,
                      error: str = None, success: str = None):
     nb = get_nb()
     device = get_device_by_name(nb, device_name)
-    site_id = device.site.id if device.site else None
-
+    # Collect VLANs actually used on this device's interfaces
     vlans = []
     try:
-        vlans = sorted(list(nb.ipam.vlans.filter(site_id=site_id)), key=lambda v: v.vid)
+        vid_set: dict[int, str] = {}
+        for iface in nb.dcim.interfaces.filter(device_id=device.id):
+            if iface.untagged_vlan:
+                vid_set[iface.untagged_vlan.vid] = iface.untagged_vlan.name
+            for v in (iface.tagged_vlans or []):
+                vid_set[v.vid] = v.name
+        vlans = [{"vid": vid, "name": name} for vid, name in sorted(vid_set.items())]
     except Exception:
         pass
 
@@ -79,15 +84,11 @@ def ui_add_vlan(device_name: str, vid: int = Form(...), name: str = Form("")):
     try:
         nb = get_nb()
         device = get_device_by_name(nb, device_name)
-        site_id  = device.site.id if device.site else None
         platform = get_platform(device)
 
-        existing = nb.ipam.vlans.get(vid=vid, site_id=site_id)
+        existing = next(iter(nb.ipam.vlans.filter(vid=vid)), None)
         if not existing:
-            vlan_data = {"vid": vid, "name": name or f"VLAN{vid}"}
-            if site_id:
-                vlan_data["site"] = site_id
-            nb.ipam.vlans.create(vlan_data)
+            nb.ipam.vlans.create({"vid": vid, "name": name or f"VLAN{vid}"})
 
         if platform == "comware":
             get_h3c(device).create_vlan(vid, name or f"VLAN{vid}")
@@ -108,10 +109,9 @@ def ui_delete_vlan(device_name: str, vid: int):
     try:
         nb = get_nb()
         device = get_device_by_name(nb, device_name)
-        site_id  = device.site.id if device.site else None
         platform = get_platform(device)
 
-        vlan_obj = nb.ipam.vlans.get(vid=vid, site_id=site_id)
+        vlan_obj = next(iter(nb.ipam.vlans.filter(vid=vid)), None)
         if vlan_obj:
             vlan_obj.delete()
 
