@@ -185,7 +185,6 @@ def ui_trunk(device_name: str, interface: str = Form(...), vlans: str = Form(...
         vlan_list = [int(v.strip()) for v in vlans.split(",") if v.strip()]
         nb = get_nb()
         device = get_device_by_name(nb, device_name)
-        site_id  = device.site.id if device.site else None
         platform = get_platform(device)
 
         nb_iface = nb.dcim.interfaces.get(device_id=device.id, name=interface)
@@ -194,7 +193,7 @@ def ui_trunk(device_name: str, interface: str = Form(...), vlans: str = Form(...
 
         current_vids = {v.id for v in (nb_iface.tagged_vlans or [])}
         for vid in vlan_list:
-            vlan_obj = nb.ipam.vlans.get(vid=vid, site_id=site_id)
+            vlan_obj = next(iter(nb.ipam.vlans.filter(vid=vid)), None)
             if vlan_obj:
                 current_vids.add(vlan_obj.id)
         nb_iface.update({"mode": "tagged", "tagged_vlans": list(current_vids)})
@@ -221,10 +220,9 @@ def ui_access(device_name: str, interface: str = Form(...),
     try:
         nb = get_nb()
         device = get_device_by_name(nb, device_name)
-        site_id  = device.site.id if device.site else None
         platform = get_platform(device)
 
-        vlan_obj = nb.ipam.vlans.get(vid=vlan, site_id=site_id)
+        vlan_obj = next(iter(nb.ipam.vlans.filter(vid=vlan)), None)
         nb_iface = nb.dcim.interfaces.get(device_id=device.id, name=interface)
         if not nb_iface:
             nb_iface = nb.dcim.interfaces.create(device=device.id, name=interface, type="1000base-t")
