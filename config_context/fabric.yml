@@ -14,6 +14,7 @@ mlag:
   domain_id: 100
   peer_link: Port-Channel100
   local_interface: Vlan4094
+  trunk_group: MLAG_PEER
   reload_delay: 300
   reload_delay_non_mlag: 330
   # peer_address — device-specific, в inventory.yml

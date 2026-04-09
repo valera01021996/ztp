@@ -34,6 +34,11 @@ ip virtual-router mac-address {{ ip_virtual_router_mac }}
 {% for vlan in vlans %}
 vlan {{ vlan.vid }}
    name {{ vlan.name }}
+{% if vlan.trunk_groups %}
+{% for tg in vlan.trunk_groups %}
+   trunk group {{ tg }}
+{% endfor %}
+{% endif %}
 !
 {% endfor %}
 {% endif %}
@@ -111,6 +116,12 @@ interface {{ iface.name }}
 {% endfor %}
 {% endif %}
 {% if mlag %}
+! === MLAG peer-link ===
+interface {{ mlag.peer_link }}
+   description MLAG PEER-LINK
+   switchport mode trunk
+   switchport trunk group {{ mlag.trunk_group | default('MLAG_PEER') }}
+!
 ! === MLAG ===
 mlag configuration
    domain-id {{ mlag.domain_id }}

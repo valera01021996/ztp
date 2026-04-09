@@ -13,7 +13,7 @@ vlans:
     name: USERS
 
   - vid: 4094
-    name: MLAG_PEER
+    name: MLAG_PEER_SYNC
 
 devices:
   - name: Leaf-1

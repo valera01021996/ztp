@@ -143,7 +143,20 @@ def build_config(nb, device, day0_only: bool = False) -> str:
                 logging.warning("[builder] %s", msg)
                 config_warnings.append(msg)
 
-    vlans = [{"vid": vid, "name": vlans_initial[vid]} for vid in sorted(vlans_initial)]
+    # Determine MLAG peer VLAN for trunk group assignment
+    mlag_trunk_group = mlag_ctx.get("trunk_group") if mlag_ctx else None
+    mlag_vlan_id = None
+    if mlag_ctx and mlag_ctx.get("local_interface"):
+        m_vlan = re.match(r'[Vv]lan(\d+)', mlag_ctx["local_interface"])
+        if m_vlan:
+            mlag_vlan_id = int(m_vlan.group(1))
+
+    vlans = []
+    for vid in sorted(vlans_initial):
+        entry = {"vid": vid, "name": vlans_initial[vid]}
+        if mlag_vlan_id and vid == mlag_vlan_id and mlag_trunk_group:
+            entry["trunk_groups"] = [mlag_trunk_group]
+        vlans.append(entry)
 
     ospf = None
     if ospf_ctx:
