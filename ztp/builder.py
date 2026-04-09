@@ -176,7 +176,8 @@ def build_config(nb, device, day0_only: bool = False) -> str:
         if loopback0_ip and not bgp.get("router_id"):
             bgp["router_id"] = loopback0_ip
 
-    mlag = mlag_ctx if mlag_ctx else None
+    # MLAG только если задан peer_address (device-specific) — иначе standalone leaf
+    mlag = mlag_ctx if (mlag_ctx and mlag_ctx.get("peer_address")) else None
 
     # VXLAN — мержим vlan_vnis из fabric (vxlan_ctx) с flood_vteps из device context
     vxlan = None

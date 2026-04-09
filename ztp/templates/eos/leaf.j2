@@ -136,7 +136,7 @@ mlag configuration
 ! === VXLAN ===
 interface Vxlan1
    vxlan source-interface {{ vxlan.source_interface | default('Loopback0') }}
-{% if vxlan.virtual_router_encapsulation %}
+{% if vxlan.virtual_router_encapsulation and mlag %}
    vxlan virtual-router encapsulation mac-address {{ vxlan.virtual_router_encapsulation }}
 {% endif %}
    vxlan udp-port {{ vxlan.udp_port | default(4789) }}
@@ -146,9 +146,6 @@ interface Vxlan1
 {% for vrf in vrfs if vrf.vni is defined %}
    vxlan vrf {{ vrf.name }} vni {{ vrf.vni }}
 {% endfor %}
-{% if vxlan.mlag_source_interface %}
-   vxlan mlag source-interface {{ vxlan.mlag_source_interface }}
-{% endif %}
 {% if vxlan.flood_vteps %}
    vxlan flood vtep {{ vxlan.flood_vteps | join(' ') }}
 {% endif %}

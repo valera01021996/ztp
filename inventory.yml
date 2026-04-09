@@ -153,7 +153,7 @@ devices:
 
       - name: Management1
         type: 1000base-t
-        ip: 192.168.1.100/24
+        ip: 192.168.1.102/24
         primary: true
         description: Management
 
@@ -164,6 +164,7 @@ devices:
       - name: Loopback1
         type: virtual
         ip: 2.2.1.1/32
+        anycast: true               # одинаковый IP на обоих MLAG peers
 
       - name: Vlan4094
         type: virtual
@@ -209,9 +210,9 @@ devices:
           - vlan: 36
             vni: 10036
         flood_vteps:
-          - 2.2.1.2                   # Loopback1 MLAG-партнёра
-          - 2.2.2.1                   # Loopback1 Leaf-3
-          - 2.2.2.2                   # Loopback1 Leaf-4
+          # MLAG партнёр (Leaf-2) НЕ указывается — у них один Loopback1 (2.2.1.1)
+          - 1.1.1.3                   # Loopback0 Leaf-3 (standalone)
+          - 1.1.1.4                   # Loopback0 Leaf-4 (standalone)
 
     port_channels:
       - name: Port-Channel100
@@ -455,3 +456,191 @@ devices:
         untagged_vlan: 20
         members:
           - Ethernet26
+
+  # ─── Leaf-3: standalone (без MLAG), dual uplink ───────────────────────────
+  - name: Leaf-3
+    site: BKM
+    location: BKM_DC-1
+    role: leaf
+    device_type: DCS-7280SR-48C6-F
+    manufacturer: Arista
+    platform: eos
+    rack: BKM_RACK-01
+    position: 40
+    rackface: front
+    height: 1
+    status: active
+
+    interfaces:
+      - name: Ethernet1
+        type: 10gbase-t
+        enabled: true
+
+      - name: Ethernet2
+        type: 10gbase-t
+        enabled: true
+
+      - name: Ethernet3
+        type: 10gbase-t
+        enabled: true
+
+      - name: Ethernet4
+        type: 10gbase-t
+        enabled: true        
+
+      - name: Ethernet49/1
+        type: 100gbase-x
+        ip: 10.0.254.9/30
+        description: Link_To_Spine1
+        enabled: true
+
+      - name: Ethernet50/1
+        type: 100gbase-x
+        ip: 10.0.254.33/30
+        description: Link_To_Spine2
+        enabled: true
+
+      - name: Management1
+        type: 1000base-t
+        ip: 192.168.1.100/24
+        primary: true
+        description: Management
+
+      - name: Loopback0
+        type: virtual
+        ip: 1.1.1.3/32
+
+      - name: Vlan10
+        type: virtual
+        vrf: PROD
+        ip: 10.10.10.1/24
+        description: MGMT SVI
+
+      - name: Vlan20
+        type: virtual
+        vrf: PROD
+        ip: 10.20.20.1/24
+        description: SERVERS SVI
+
+    config_context:
+      # Standalone leaf — нет mlag секции, нет Loopback1
+
+      bgp:
+        asn: 65000
+        neighbors:
+          - ip: 1.1.1.201
+            remote_as: 65000
+            description: Spine-1
+            update_source: Loopback0
+            evpn: true
+          - ip: 1.1.1.202
+            remote_as: 65000
+            description: Spine-2
+            update_source: Loopback0
+            evpn: true
+
+      vxlan:
+        source_interface: Loopback0   # standalone: переопределяем fabric.yml (там Loopback1)
+        vlan_vnis:
+          - vlan: 20
+            vni: 10020
+          - vlan: 36
+            vni: 10036
+        flood_vteps:
+          - 2.2.1.1                   # Loopback1 anycast MLAG пары Leaf-1/Leaf-2
+          - 1.1.1.4                   # Loopback0 Leaf-4 (standalone)
+
+    port_channels:
+      - name: Port-Channel1
+        type: lag
+        mode: lacp
+        mtu: 9214
+        description: SRV1
+        untagged_vlan: 20
+        members:
+          - Ethernet1
+          - Ethernet2
+
+      - name: Port-Channel2
+        type: lag
+        mode: lacp
+        mtu: 9214
+        description: SRV2
+        untagged_vlan: 20
+        members:
+          - Ethernet3
+          - Ethernet4
+
+  # ─── Leaf-4: standalone, SINGLE uplink (только Spine-1) ───────────────────
+  # Отличие от Leaf-3: нет Ethernet50/1, один BGP neighbor
+  # Template и builder никак не меняются — просто меньше записей в списках
+  - name: Leaf-4
+    site: BKM
+    location: BKM_DC-1
+    role: leaf
+    device_type: DCS-7280SR-48C6-F
+    manufacturer: Arista
+    platform: eos
+    rack: BKM_RACK-01
+    position: 38
+    rackface: front
+    height: 1
+    status: active
+
+    interfaces:
+      - name: Ethernet1
+        type: 10gbase-t
+        enabled: true
+
+      - name: Ethernet49/1
+        type: 100gbase-x
+        ip: 10.0.254.13/30
+        description: Link_To_Spine1
+        enabled: true
+        # нет Ethernet50/1 — единственный uplink
+
+      - name: Management1
+        type: 1000base-t
+        ip: 192.168.1.103/24
+        primary: true
+        description: Management
+
+      - name: Loopback0
+        type: virtual
+        ip: 1.1.1.4/32
+
+      - name: Vlan20
+        type: virtual
+        vrf: PROD
+        ip: 10.20.20.1/24
+        description: SERVERS SVI
+
+    config_context:
+      bgp:
+        asn: 65000
+        neighbors:
+          - ip: 1.1.1.201
+            remote_as: 65000
+            description: Spine-1
+            update_source: Loopback0
+            evpn: true
+          # нет второго neighbor — один Spine
+
+      vxlan:
+        source_interface: Loopback0   # standalone: переопределяем fabric.yml (там Loopback1)
+        vlan_vnis:
+          - vlan: 20
+            vni: 10020
+        flood_vteps:
+          - 2.2.1.1                   # Loopback1 anycast MLAG пары Leaf-1/Leaf-2
+          - 1.1.1.3                   # Loopback0 Leaf-3 (standalone)
+
+    port_channels:
+      - name: Port-Channel1
+        type: lag
+        mode: lacp
+        mtu: 9214
+        description: SRV1
+        untagged_vlan: 20
+        members:
+          - Ethernet1

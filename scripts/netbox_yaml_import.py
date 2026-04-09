@@ -348,6 +348,7 @@ class YAMLInventoryImport(Script):
             tagged_vids = entry.get("tagged_vlans", [])
             ip_addr = entry.get("ip")
             is_primary = entry.get("primary", False)
+            is_anycast = entry.get("anycast", False)
 
             # Определяем mode для NetBox
             nb_mode = ""
@@ -396,7 +397,7 @@ class YAMLInventoryImport(Script):
 
             # Создаём IP-адрес если указан
             if ip_addr:
-                self._create_ip(device, iface, ip_addr, is_primary)
+                self._create_ip(device, iface, ip_addr, is_primary, is_anycast)
 
     # ── Port-Channels ─────────────────────────────────────────────────────────
 
@@ -473,7 +474,8 @@ class YAMLInventoryImport(Script):
 
     # ── IP-адреса ─────────────────────────────────────────────────────────────
 
-    def _create_ip(self, device: Device, iface: Interface, address: str, is_primary: bool):
+    def _create_ip(self, device: Device, iface: Interface, address: str,
+                   is_primary: bool, is_anycast: bool = False):
         # Создаём префикс
         try:
             network = str(_ipaddress.ip_interface(address).network)
@@ -488,25 +490,45 @@ class YAMLInventoryImport(Script):
 
         # Создаём IP
         ct = ContentType.objects.get_for_model(Interface)
-        ip_obj, created = IPAddress.objects.get_or_create(
-            address=address,
-            defaults={
-                "status": "active",
-                "assigned_object_type": ct,
-                "assigned_object_id": iface.pk,
-            },
-        )
 
-        if created:
-            self.log_success(f"  Создан IP: {address} → {device.name}/{iface.name}")
-        else:
-            if ip_obj.assigned_object_id != iface.pk:
-                ip_obj.assigned_object_type = ct
-                ip_obj.assigned_object_id = iface.pk
-                ip_obj.save()
-                self.log_info(f"  Обновлена привязка IP: {address} → {device.name}/{iface.name}")
+        if is_anycast:
+            # Anycast: один и тот же IP может быть на нескольких устройствах (MLAG пара)
+            # Ищем существующий IP привязанный именно к этому интерфейсу
+            ip_obj = IPAddress.objects.filter(
+                address=address,
+                assigned_object_type=ct,
+                assigned_object_id=iface.pk,
+            ).first()
+            if not ip_obj:
+                ip_obj = IPAddress.objects.create(
+                    address=address,
+                    status="active",
+                    role="anycast",
+                    assigned_object_type=ct,
+                    assigned_object_id=iface.pk,
+                )
+                self.log_success(f"  Создан anycast IP: {address} → {device.name}/{iface.name}")
             else:
-                self.log_info(f"  IP уже существует: {address}")
+                self.log_info(f"  Anycast IP уже существует: {address} → {device.name}/{iface.name}")
+        else:
+            ip_obj, created = IPAddress.objects.get_or_create(
+                address=address,
+                defaults={
+                    "status": "active",
+                    "assigned_object_type": ct,
+                    "assigned_object_id": iface.pk,
+                },
+            )
+            if created:
+                self.log_success(f"  Создан IP: {address} → {device.name}/{iface.name}")
+            else:
+                if ip_obj.assigned_object_id != iface.pk:
+                    ip_obj.assigned_object_type = ct
+                    ip_obj.assigned_object_id = iface.pk
+                    ip_obj.save()
+                    self.log_info(f"  Обновлена привязка IP: {address} → {device.name}/{iface.name}")
+                else:
+                    self.log_info(f"  IP уже существует: {address}")
 
         # Primary IP
         if is_primary:

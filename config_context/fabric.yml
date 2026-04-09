@@ -22,8 +22,8 @@ mlag:
 # ── VXLAN (общее) ─────────────────────────────────────────────────────────────
 vxlan:
   udp_port: 4789
-  source_interface: Loopback0
-  mlag_source_interface: Loopback1
+  source_interface: Loopback1       # anycast shared Loopback1 для MLAG пар
+                                    # standalone leaf переопределяет на Loopback0
   virtual_router_encapsulation: mlag-system-id
   # flood_vteps — device-specific, в inventory.yml
   # vlan_vnis — device-specific, в inventory.yml config_context
