@@ -149,6 +149,19 @@ router ospf {{ ospf.process_id | default(1) }}
 {% endif %}
 !
 {% endif %}
+{% for vrf in vrfs %}
+{% if vrf.prefix_list and vrf.prefixes %}
+! === Prefix-list / Route-map: {{ vrf.name }} ===
+ip prefix-list {{ vrf.prefix_list }}
+{% for prefix in vrf.prefixes %}
+   seq {{ loop.index * 10 }} permit {{ prefix }}
+{% endfor %}
+!
+route-map {{ vrf.route_map_export }} permit 10
+   match ip address prefix-list {{ vrf.prefix_list }}
+!
+{% endif %}
+{% endfor %}
 {% if bgp %}
 ! === BGP ===
 router bgp {{ bgp.asn }}

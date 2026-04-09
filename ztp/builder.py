@@ -163,6 +163,19 @@ def build_config(nb, device, day0_only: bool = False) -> str:
     if vxlan_ctx:
         vxlan = {**vxlan_ctx}
 
+    # SVI префиксы по VRF — для автогенерации prefix-list
+    svi_prefixes_by_vrf: dict[str, list[str]] = {}
+    for iface in nb_ifaces:
+        if not iface.name.lower().startswith("vlan"):
+            continue
+        if not iface.vrf:
+            continue
+        if iface.id not in ip_by_iface:
+            continue
+        vrf_name = iface.vrf.name
+        network = str(ipaddress.ip_interface(ip_by_iface[iface.id]).network)
+        svi_prefixes_by_vrf.setdefault(vrf_name, []).append(network)
+
     # VRFs from NetBox — обогащаем данными из vrf_extra
     vrf_ids = {iface.vrf.id for iface in nb_ifaces if iface.vrf}
     vrfs = []
@@ -179,6 +192,8 @@ def build_config(nb, device, day0_only: bool = False) -> str:
             "rd_suffix":        rd_suffix,
             "route_target":     extra.get("route_target", f"{vni}:{vni}" if vni else ""),
             "route_map_export": extra.get("route_map_export"),
+            "prefix_list":      extra.get("prefix_list"),
+            "prefixes":         sorted(svi_prefixes_by_vrf.get(vrf_obj.name, [])),
             "import_targets":   [rt.name for rt in (vrf_obj.import_targets or [])],
             "export_targets":   [rt.name for rt in (vrf_obj.export_targets or [])],
         })

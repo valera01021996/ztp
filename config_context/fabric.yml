@@ -34,6 +34,7 @@ vrf_extra:
     rd_suffix: 50000
     route_target: "50000:50000"
     route_map_export: PROD-EXPORT
+    prefix_list: TENANTS
 
 # ── BGP (общее) ───────────────────────────────────────────────────────────────
 bgp:
