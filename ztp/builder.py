@@ -87,6 +87,10 @@ def build_config(nb, device, day0_only: bool = False) -> str:
             needed_vids.add(iface.untagged_vlan.vid)
         for v in (iface.tagged_vlans or []):
             needed_vids.add(v.vid)
+        # SVI interfaces like Vlan4094 — add their VLAN too
+        m_svi = re.match(r'^[Vv]lan(\d+)$', iface.name)
+        if m_svi:
+            needed_vids.add(int(m_svi.group(1)))
 
     if mgmt_iface:
         m = re.match(r'^[Vv][Ll][Aa][Nn]\s*(\d+)$', mgmt_iface.strip())
