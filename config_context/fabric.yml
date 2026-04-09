@@ -46,7 +46,6 @@ bgp:
 # ── OSPF (общее) ──────────────────────────────────────────────────────────────
 ospf:
   process_id: 1
-  passive_default: true
   max_lsa: 12000
 
 ospf_interfaces:
