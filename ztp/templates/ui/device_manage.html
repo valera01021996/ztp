@@ -147,50 +147,88 @@
     <table>
         <thead>
             <tr>
+                <th></th>
                 <th>Interface</th>
+                <th>Description</th>
                 <th>LAG</th>
                 <th>Mode</th>
-                <th>VLANs</th>
+                <th>Access VLAN</th>
+                <th>Trunk VLANs</th>
                 <th>IP Address</th>
                 <th>MTU</th>
             </tr>
         </thead>
         <tbody>
         {% for iface in interfaces %}
-        <tr>
-            <td class="mono" style="font-size:12px;">{{ iface.name }}</td>
+        <tr style="{% if not iface.enabled %}opacity:0.45;{% endif %}">
+            <td style="width:8px; padding-right:0;">
+                <span title="{% if iface.enabled %}enabled{% else %}disabled{% endif %}"
+                      style="display:inline-block; width:7px; height:7px; border-radius:50%;
+                             background:{% if iface.enabled %}var(--green){% else %}var(--red){% endif %};"></span>
+            </td>
+            <td class="mono" style="font-size:12px; white-space:nowrap;">
+                {{ iface.name }}
+                {% if 'mlag-portchannel' in iface.tags %}
+                <span style="font-size:10px; color:#a78bfa; border:1px solid rgba(167,139,250,0.3);
+                             background:rgba(167,139,250,0.08); border-radius:3px; padding:1px 4px; margin-left:4px;">mlag</span>
+                {% endif %}
+            </td>
+            <td style="font-size:12px; color:var(--text2); max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                {{ iface.description or '—' }}
+            </td>
             <td class="mono" style="font-size:11px; color:var(--text3);">{{ iface.lag or '—' }}</td>
             <td>
-                {% if iface.mode %}
-                <span class="badge {% if iface.mode == 'access' %}badge-pending{% else %}badge-approved{% endif %}"
-                      style="font-size:11px;">{{ iface.mode }}</span>
+                {% if iface.mode == 'access' %}
+                <span class="badge badge-pending" style="font-size:10px;">access</span>
+                {% elif iface.mode == 'tagged' %}
+                <span class="badge badge-approved" style="font-size:10px;">trunk</span>
+                {% elif iface.mode %}
+                <span class="badge" style="font-size:10px;">{{ iface.mode }}</span>
                 {% else %}
                 <span class="meta">—</span>
                 {% endif %}
             </td>
             <td>
-                {% for v in iface.vlans %}
-                <span class="vlan-chip">
+                {% if iface.untagged %}
+                <span class="vlan-chip" title="{{ iface.untagged.name }}">
+                    {{ iface.untagged.vid }}
+                    <form method="post"
+                          action="/ui/devices/{{ device_name }}/vlans/{{ iface.untagged.vid }}/remove_from_port"
+                          style="display:inline;"
+                          onsubmit="return confirm('Remove VLAN {{ iface.untagged.vid }} from {{ iface.name }}?')">
+                        <input type="hidden" name="interface" value="{{ iface.name }}">
+                        <button type="submit" title="Remove">×</button>
+                    </form>
+                </span>
+                {% else %}
+                <span class="meta">—</span>
+                {% endif %}
+            </td>
+            <td>
+                {% if iface.tagged %}
+                {% for v in iface.tagged %}
+                <span class="vlan-chip" title="{{ v.name }}">
                     {{ v.vid }}
                     <form method="post"
                           action="/ui/devices/{{ device_name }}/vlans/{{ v.vid }}/remove_from_port"
                           style="display:inline;"
                           onsubmit="return confirm('Remove VLAN {{ v.vid }} from {{ iface.name }}?')">
                         <input type="hidden" name="interface" value="{{ iface.name }}">
-                        <button type="submit" title="Remove from port">×</button>
+                        <button type="submit" title="Remove">×</button>
                     </form>
                 </span>
+                {% endfor %}
                 {% else %}
                 <span class="meta">—</span>
-                {% endfor %}
+                {% endif %}
             </td>
             <td style="font-size:12px;">
                 {% for ip in iface.ips %}
-                <div style="display:flex; align-items:center; gap:5px; margin-bottom:2px;">
+                <div style="display:flex; align-items:center; gap:4px; margin-bottom:2px; white-space:nowrap;">
                     <span class="mono">{{ ip.address }}</span>
                     {% if ip.anycast %}
                     <span style="font-size:10px; color:#f59e0b; border:1px solid rgba(245,158,11,0.3);
-                                 background:rgba(245,158,11,0.08); border-radius:3px; padding:1px 5px;">anycast</span>
+                                 background:rgba(245,158,11,0.08); border-radius:3px; padding:1px 4px;">anycast</span>
                     {% endif %}
                 </div>
                 {% else %}

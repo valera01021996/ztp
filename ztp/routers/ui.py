@@ -72,24 +72,34 @@ def ui_device_manage(request: Request, device_name: str,
         for iface in nb.dcim.interfaces.filter(device_id=device.id):
             mode_obj = getattr(iface, 'mode', None)
             mode = mode_obj.value if mode_obj else None
+            type_obj = getattr(iface, 'type', None)
+            iface_type = type_obj.value if type_obj else None
 
-            iface_vlans = []
+            untagged = None
+            tagged = []
             if iface.untagged_vlan and getattr(iface.untagged_vlan, 'vid', None):
                 v = iface.untagged_vlan
                 vid_map.setdefault(v.vid, v.name)
-                iface_vlans.append({"vid": v.vid, "name": v.name})
+                untagged = {"vid": v.vid, "name": v.name}
             for v in (iface.tagged_vlans or []):
                 if getattr(v, 'vid', None):
                     vid_map.setdefault(v.vid, v.name)
-                    iface_vlans.append({"vid": v.vid, "name": v.name})
+                    tagged.append({"vid": v.vid, "name": v.name})
+
+            tags = [t.slug for t in (iface.tags or [])]
 
             interfaces.append({
-                "name":  iface.name,
-                "mode":  mode,
-                "lag":   iface.lag.name if getattr(iface, 'lag', None) else None,
-                "mtu":   iface.mtu,
-                "ips":   ip_by_iface.get(iface.id, []),
-                "vlans": iface_vlans,
+                "name":        iface.name,
+                "description": iface.description or "",
+                "type":        iface_type,
+                "enabled":     iface.enabled if iface.enabled is not None else True,
+                "mode":        mode,
+                "lag":         iface.lag.name if getattr(iface, 'lag', None) else None,
+                "mtu":         iface.mtu,
+                "ips":         ip_by_iface.get(iface.id, []),
+                "untagged":    untagged,
+                "tagged":      tagged,
+                "tags":        tags,
             })
 
         vlans = [{"vid": vid, "name": name} for vid, name in sorted(vid_map.items())]
