@@ -52,32 +52,56 @@ def ui_device_manage(request: Request, device_name: str,
                      error: str = None, success: str = None):
     nb = get_nb()
     device = get_device_by_name(nb, device_name)
-    # Collect VLANs and ports from NetBox interfaces
+    # Collect interfaces and VLANs from NetBox
     vlans = []
-    ports = []
+    interfaces = []
     try:
+        # Fetch all IPs for device once
+        ip_by_iface: dict[int, list] = {}
+        for ip in nb.ipam.ip_addresses.filter(device_id=device.id):
+            iface_obj = getattr(ip, 'assigned_object', None)
+            iface_id = iface_obj.id if iface_obj else None
+            if iface_id:
+                role_val = ip.role.value if getattr(ip, 'role', None) else None
+                ip_by_iface.setdefault(iface_id, []).append({
+                    "address": str(ip.address),
+                    "anycast": role_val == "anycast",
+                })
+
         vid_map: dict[int, str] = {}
         for iface in nb.dcim.interfaces.filter(device_id=device.id):
             mode_obj = getattr(iface, 'mode', None)
             mode = mode_obj.value if mode_obj else None
-            if not mode:
-                continue
-            port_vlans = []
+
+            iface_vlans = []
             if iface.untagged_vlan and getattr(iface.untagged_vlan, 'vid', None):
                 v = iface.untagged_vlan
                 vid_map.setdefault(v.vid, v.name)
-                port_vlans.append({"vid": v.vid, "name": v.name})
+                iface_vlans.append({"vid": v.vid, "name": v.name})
             for v in (iface.tagged_vlans or []):
                 if getattr(v, 'vid', None):
                     vid_map.setdefault(v.vid, v.name)
-                    port_vlans.append({"vid": v.vid, "name": v.name})
-            ports.append({"name": iface.name, "mode": mode, "vlans": port_vlans})
+                    iface_vlans.append({"vid": v.vid, "name": v.name})
+
+            interfaces.append({
+                "name":  iface.name,
+                "mode":  mode,
+                "lag":   iface.lag.name if getattr(iface, 'lag', None) else None,
+                "mtu":   iface.mtu,
+                "ips":   ip_by_iface.get(iface.id, []),
+                "vlans": iface_vlans,
+            })
 
         vlans = [{"vid": vid, "name": name} for vid, name in sorted(vid_map.items())]
-        ports.sort(key=lambda p: (
-            0 if p["name"].startswith("Port-Channel") else 1,
-            int(''.join(filter(str.isdigit, p["name"])) or 0),
-        ))
+
+        _order = {"Port-Channel": 0, "Ethernet": 1, "Vlan": 2, "Loopback": 3, "Management": 4}
+        def _iface_sort(i):
+            name = i["name"]
+            prefix = next((v for k, v in _order.items() if name.startswith(k)), 9)
+            num = int(''.join(filter(str.isdigit, name)) or 0)
+            return (prefix, num)
+        interfaces.sort(key=_iface_sort)
+
     except Exception:
         pass
 
@@ -89,7 +113,7 @@ def ui_device_manage(request: Request, device_name: str,
         "role":       role_obj.name if role_obj else "—",
         "primary_ip": str(device.primary_ip4).split("/")[0] if device.primary_ip4 else "—",
         "vlans":      vlans,
-        "ports":      ports,
+        "interfaces": interfaces,
         "error":      error,
         "success":    success,
         "active":     "devices",

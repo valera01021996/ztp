@@ -133,51 +133,77 @@
     </div>
 </details>
 
-<!-- Ports table -->
+<!-- Interfaces table -->
 <details class="card" style="padding: 0;">
     <summary style="padding: 14px 20px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; user-select: none;">
         <span style="font-weight: 600; color: var(--text); display:flex; align-items:center; gap:8px;">
             <span class="chevron" style="color:var(--text3); font-size:11px;">▶</span>
-            Ports
+            Interfaces
         </span>
-        <span class="meta">{{ ports | length }} configured</span>
+        <span class="meta">{{ interfaces | length }} total</span>
     </summary>
     <div style="border-top: 1px solid var(--border);">
-    {% if ports %}
+    {% if interfaces %}
     <table>
         <thead>
-            <tr><th>Interface</th><th>Mode</th><th>VLANs</th></tr>
+            <tr>
+                <th>Interface</th>
+                <th>LAG</th>
+                <th>Mode</th>
+                <th>VLANs</th>
+                <th>IP Address</th>
+                <th>MTU</th>
+            </tr>
         </thead>
         <tbody>
-        {% for port in ports %}
+        {% for iface in interfaces %}
         <tr>
-            <td class="mono">{{ port.name }}</td>
+            <td class="mono" style="font-size:12px;">{{ iface.name }}</td>
+            <td class="mono" style="font-size:11px; color:var(--text3);">{{ iface.lag or '—' }}</td>
             <td>
-                <span class="badge {% if port.mode == 'access' %}badge-pending{% else %}badge-approved{% endif %}"
-                      style="font-size:11px;">{{ port.mode }}</span>
+                {% if iface.mode %}
+                <span class="badge {% if iface.mode == 'access' %}badge-pending{% else %}badge-approved{% endif %}"
+                      style="font-size:11px;">{{ iface.mode }}</span>
+                {% else %}
+                <span class="meta">—</span>
+                {% endif %}
             </td>
             <td>
-                {% for v in port.vlans %}
+                {% for v in iface.vlans %}
                 <span class="vlan-chip">
                     {{ v.vid }}
                     <form method="post"
                           action="/ui/devices/{{ device_name }}/vlans/{{ v.vid }}/remove_from_port"
                           style="display:inline;"
-                          onsubmit="return confirm('Remove VLAN {{ v.vid }} from {{ port.name }}?')">
-                        <input type="hidden" name="interface" value="{{ port.name }}">
+                          onsubmit="return confirm('Remove VLAN {{ v.vid }} from {{ iface.name }}?')">
+                        <input type="hidden" name="interface" value="{{ iface.name }}">
                         <button type="submit" title="Remove from port">×</button>
                     </form>
                 </span>
                 {% else %}
-                <span class="meta" style="font-size:12px;">—</span>
+                <span class="meta">—</span>
                 {% endfor %}
             </td>
+            <td style="font-size:12px;">
+                {% for ip in iface.ips %}
+                <div style="display:flex; align-items:center; gap:5px; margin-bottom:2px;">
+                    <span class="mono">{{ ip.address }}</span>
+                    {% if ip.anycast %}
+                    <span style="font-size:10px; color:#f59e0b; border:1px solid rgba(245,158,11,0.3);
+                                 background:rgba(245,158,11,0.08); border-radius:3px; padding:1px 5px;">anycast</span>
+                    {% endif %}
+                </div>
+                {% else %}
+                <span class="meta">—</span>
+                {% endfor %}
+            </td>
+            <td class="meta" style="font-size:12px;">{{ iface.mtu or '—' }}</td>
         </tr>
         {% endfor %}
         </tbody>
     </table>
     {% else %}
-    <div style="padding: 20px; color: var(--text3); font-size: 13px;">No configured ports.</div>
+    <div style="padding: 20px; color: var(--text3); font-size: 13px;">No interfaces found.</div>
     {% endif %}
     </div>
 </details>
