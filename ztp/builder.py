@@ -97,6 +97,28 @@ def build_config(nb, device, day0_only: bool = False) -> str:
         for vlan in nb.ipam.vlans.filter(vid=vid):
             vlan_map[vid] = vlan.name
             break
+
+    # Добавляем VLANы из vxlan.vlan_vnis — они должны быть созданы на коммутаторе
+    vxlan_vnis = (ctx.get("vxlan") or {}).get("vlan_vnis", [])
+    warnings = []
+    for entry in vxlan_vnis:
+        vid = entry.get("vlan")
+        if not vid:
+            continue
+        needed_vids.add(vid)
+        if vid not in vlan_map:
+            nb_vlan = next(iter(nb.ipam.vlans.filter(vid=vid)), None)
+            if nb_vlan:
+                vlan_map[vid] = nb_vlan.name
+            else:
+                vlan_map[vid] = f"VLAN{vid}"
+                warnings.append(f"VLAN {vid} используется в VXLAN но не найден в NetBox — создан с именем VLAN{vid}")
+
+    if warnings:
+        import logging
+        for w in warnings:
+            logging.warning("[builder] %s", w)
+
     vlans = [{"vid": vid, "name": vlan_map[vid]} for vid in sorted(vlan_map)]
 
     # Router ID — Loopback0 IP
