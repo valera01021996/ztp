@@ -33,7 +33,8 @@
                 <th>Site</th>
                 <th>Primary IP</th>
                 <th>Serial</th>
-                <th>Status</th>
+                <th>Config</th>
+                <th>NetBox Status</th>
                 <th>Actions</th>
             </tr>
         </thead>
@@ -49,10 +50,18 @@
                 </td>
                 <td class="meta" style="font-family: monospace; font-size: 12px;">{{ d.serial or '—' }}</td>
                 <td>
-                    <span class="badge badge-{% if d.status.value == 'active' %}approved{% else %}pending{% endif %}">
-                        {{ d.status.label if d.status else '—' }}
-                    </span>
+                    {% set tag_slugs = d.tags | map(attribute='slug') | list %}
+                    {% if 'config-deployed' in tag_slugs %}
+                        <span class="badge" style="background:#0a2e1a; color:#4ade80;">config-deployed</span>
+                    {% elif 'day0-deployed' in tag_slugs %}
+                        <span class="badge" style="background:#0c1a2e; color:#38bdf8;">day0-deployed</span>
+                    {% elif 'config-pending' in tag_slugs %}
+                        <span class="badge" style="background:#2a1a00; color:#fb923c;">config-pending</span>
+                    {% else %}
+                        <span class="meta">—</span>
+                    {% endif %}
                 </td>
+                <td><span class="badge badge-{% if d.status.value == 'active' %}approved{% else %}pending{% endif %}" style="font-size:11px;">{{ d.status.label if d.status else '—' }}</span></td>
                 <td style="display: flex; gap: 8px; flex-wrap: wrap;">
                     <a href="/ui/devices/{{ d.name }}" class="btn btn-primary btn-sm">Manage</a>
                     <form method="post" action="/ui/generate/{{ d.name }}" style="display:inline;">

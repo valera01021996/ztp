@@ -612,6 +612,7 @@ devices:
     rackface: front
     height: 1
     status: active
+    deployed: true  # уже в PROD
 
     interfaces:
       - name: Ethernet1
