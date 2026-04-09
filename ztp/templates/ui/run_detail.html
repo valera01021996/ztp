@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Run #{{ run.id }}{% endblock %}
+{% block topbar_title %}Run #{{ run.id }} — {{ run.device_name }}{% endblock %}
 {% block content %}
 
 <div class="flex-between">
