@@ -1,4 +1,5 @@
 import re
+import logging
 import ipaddress
 from config import ADMIN_PASSWORD, ROLE_TEMPLATES, DEFAULT_TEMPLATES
 from templates import get_jinja_env
@@ -98,28 +99,7 @@ def build_config(nb, device, day0_only: bool = False) -> str:
             vlan_map[vid] = vlan.name
             break
 
-    # Добавляем VLANы из vxlan.vlan_vnis — они должны быть созданы на коммутаторе
-    vxlan_vnis = (ctx.get("vxlan") or {}).get("vlan_vnis", [])
-    warnings = []
-    for entry in vxlan_vnis:
-        vid = entry.get("vlan")
-        if not vid:
-            continue
-        needed_vids.add(vid)
-        if vid not in vlan_map:
-            nb_vlan = next(iter(nb.ipam.vlans.filter(vid=vid)), None)
-            if nb_vlan:
-                vlan_map[vid] = nb_vlan.name
-            else:
-                vlan_map[vid] = f"VLAN{vid}"
-                warnings.append(f"VLAN {vid} используется в VXLAN но не найден в NetBox — создан с именем VLAN{vid}")
-
-    if warnings:
-        import logging
-        for w in warnings:
-            logging.warning("[builder] %s", w)
-
-    vlans = [{"vid": vid, "name": vlan_map[vid]} for vid in sorted(vlan_map)]
+    vlans_initial = vlan_map  # будет дополнен после загрузки ctx
 
     # Router ID — Loopback0 IP
     loopback0_ip = None
@@ -146,6 +126,21 @@ def build_config(nb, device, day0_only: bool = False) -> str:
     vrf_extra             = ctx.get("vrf_extra", {})
     mlag_ctx              = ctx.get("mlag", {})
     vxlan_ctx             = ctx.get("vxlan", {})
+
+    # Добавляем VLANы из vxlan.vlan_vnis — они должны быть созданы на коммутаторе
+    for entry in vxlan_ctx.get("vlan_vnis", []):
+        vid = entry.get("vlan")
+        if not vid:
+            continue
+        if vid not in vlans_initial:
+            nb_vlan = next(iter(nb.ipam.vlans.filter(vid=vid)), None)
+            if nb_vlan:
+                vlans_initial[vid] = nb_vlan.name
+            else:
+                vlans_initial[vid] = f"VLAN{vid}"
+                logging.warning("[builder] VLAN %d используется в VXLAN но не найден в NetBox", vid)
+
+    vlans = [{"vid": vid, "name": vlans_initial[vid]} for vid in sorted(vlans_initial)]
 
     ospf = None
     if ospf_ctx:
