@@ -134,11 +134,15 @@
 </details>
 
 <!-- Ports table -->
-<div class="card" style="padding: 0;">
-    <div class="card-header" style="padding: 14px 20px;">
-        <h2>Ports</h2>
+<details class="card" style="padding: 0;">
+    <summary style="padding: 14px 20px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; user-select: none;">
+        <span style="font-weight: 600; color: var(--text); display:flex; align-items:center; gap:8px;">
+            <span class="chevron" style="color:var(--text3); font-size:11px;">▶</span>
+            Ports
+        </span>
         <span class="meta">{{ ports | length }} configured</span>
-    </div>
+    </summary>
+    <div style="border-top: 1px solid var(--border);">
     {% if ports %}
     <table>
         <thead>
@@ -175,7 +179,8 @@
     {% else %}
     <div style="padding: 20px; color: var(--text3); font-size: 13px;">No configured ports.</div>
     {% endif %}
-</div>
+    </div>
+</details>
 
 <!-- Configure Port with live preview -->
 <div class="card">
