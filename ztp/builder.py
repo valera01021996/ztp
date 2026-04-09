@@ -128,6 +128,7 @@ def build_config(nb, device, day0_only: bool = False) -> str:
     vxlan_ctx             = ctx.get("vxlan", {})
 
     # Добавляем VLANы из vxlan.vlan_vnis — они должны быть созданы на коммутаторе
+    config_warnings = []
     for entry in vxlan_ctx.get("vlan_vnis", []):
         vid = entry.get("vlan")
         if not vid:
@@ -138,7 +139,9 @@ def build_config(nb, device, day0_only: bool = False) -> str:
                 vlans_initial[vid] = nb_vlan.name
             else:
                 vlans_initial[vid] = f"VLAN{vid}"
-                logging.warning("[builder] VLAN %d используется в VXLAN но не найден в NetBox", vid)
+                msg = f"WARNING: VLAN {vid} используется в VXLAN но не найден в NetBox — добавь в inventory.yml"
+                logging.warning("[builder] %s", msg)
+                config_warnings.append(msg)
 
     vlans = [{"vid": vid, "name": vlans_initial[vid]} for vid in sorted(vlans_initial)]
 
@@ -216,4 +219,5 @@ def build_config(nb, device, day0_only: bool = False) -> str:
         vrfs=vrfs,
         ip_virtual_router_mac=ip_virtual_router_mac,
         router_id=loopback0_ip,
+        config_warnings=config_warnings,
     )

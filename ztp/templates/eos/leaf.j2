@@ -1,4 +1,7 @@
 {% include 'eos/base.j2' %}
+{% for w in config_warnings | default([]) %}
+! ⚠ {{ w }}
+{% endfor %}
 {% if hardware and hardware.tcam_profile %}
 hardware tcam
    system profile {{ hardware.tcam_profile }}
