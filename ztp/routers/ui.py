@@ -121,7 +121,7 @@ def ui_device_manage(request: Request, device_name: str,
     ospf_error: str = ""
     try:
         if platform == "eos":
-            result = get_eapi(device).run(["enable", "show ip ospf interface"])
+            result = get_eapi(device).run(["enable", "show ip ospf interface brief"])
             # EOS wraps interfaces under vrfs -> <vrf> -> interfaces
             all_ifaces = {}
             for vrf_data in result[1].get("vrfs", {}).values():
@@ -317,6 +317,65 @@ def ui_access(device_name: str, interface: str = Form(...),
             get_eapi(device).run(cmds)
 
         return RedirectResponse(f"/ui/devices/{device_name}?success=Access+port+{interface}+set+to+VLAN+{vlan}", status_code=303)
+    except Exception as e:
+        return RedirectResponse(f"/ui/devices/{device_name}?error={str(e)[:120]}", status_code=303)
+
+
+@router.post("/ui/devices/{device_name}/ip/add")
+def ui_ip_add(device_name: str, interface: str = Form(...), address: str = Form(...)):
+    """Add IP address to interface — updates switch and NetBox."""
+    try:
+        nb = get_nb()
+        device = get_device_by_name(nb, device_name)
+        platform = get_platform(device)
+
+        # Find or create IP in NetBox and assign to interface
+        nb_iface = nb.dcim.interfaces.get(device_id=device.id, name=interface)
+        ip_obj = next(iter(nb.ipam.ip_addresses.filter(address=address)), None)
+        if not ip_obj:
+            ip_obj = nb.ipam.ip_addresses.create({"address": address})
+        if nb_iface:
+            ip_obj.update({
+                "assigned_object_type": "dcim.interface",
+                "assigned_object_id": nb_iface.id,
+            })
+
+        # Push to switch
+        if platform == "eos":
+            get_eapi(device).run([
+                "enable", "configure",
+                f"interface {interface}",
+                "no switchport",
+                f"ip address {address}",
+            ])
+
+        return RedirectResponse(f"/ui/devices/{device_name}?success=IP+{address}+set+on+{interface}", status_code=303)
+    except Exception as e:
+        return RedirectResponse(f"/ui/devices/{device_name}?error={str(e)[:120]}", status_code=303)
+
+
+@router.post("/ui/devices/{device_name}/ip/remove")
+def ui_ip_remove(device_name: str, interface: str = Form(...), address: str = Form(...)):
+    """Remove IP address from interface — updates switch and NetBox."""
+    try:
+        nb = get_nb()
+        device = get_device_by_name(nb, device_name)
+        platform = get_platform(device)
+
+        # Unassign from NetBox (delete IP object)
+        ip_obj = next(iter(nb.ipam.ip_addresses.filter(address=address)), None)
+        if ip_obj:
+            ip_obj.update({"assigned_object_type": None, "assigned_object_id": None})
+
+        # Push to switch
+        if platform == "eos":
+            get_eapi(device).run([
+                "enable", "configure",
+                f"interface {interface}",
+                f"no ip address {address}",
+            ])
+
+        return RedirectResponse(f"/ui/devices/{device_name}?success=IP+{address}+removed+from+{interface}", status_code=303)
     except Exception as e:
         return RedirectResponse(f"/ui/devices/{device_name}?error={str(e)[:120]}", status_code=303)
 

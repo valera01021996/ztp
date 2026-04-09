@@ -231,6 +231,13 @@
                     <span style="font-size:10px; color:#f59e0b; border:1px solid rgba(245,158,11,0.3);
                                  background:rgba(245,158,11,0.08); border-radius:3px; padding:1px 4px;">anycast</span>
                     {% endif %}
+                    <form method="post" action="/ui/devices/{{ device_name }}/ip/remove"
+                          style="display:inline;"
+                          onsubmit="return confirm('Remove {{ ip.address }} from {{ iface.name }}?')">
+                        <input type="hidden" name="interface" value="{{ iface.name }}">
+                        <input type="hidden" name="address" value="{{ ip.address }}">
+                        <button type="submit" style="background:none; border:none; color:#f87171; cursor:pointer; font-size:13px; padding:0 2px;" title="Remove IP">×</button>
+                    </form>
                 </div>
                 {% else %}
                 <span class="meta">—</span>
@@ -279,10 +286,12 @@
                     <option value="access">Set access VLAN</option>
                     <option value="trunk-add">Add VLANs to trunk</option>
                     <option value="trunk-remove">Remove VLANs from trunk</option>
+                    <option value="ip-add">Set IP address</option>
+                    <option value="ip-remove">Remove IP address</option>
                 </select>
             </div>
             <div>
-                <label class="meta" style="display:block; margin-bottom:5px;">
+                <label class="meta" style="display:block; margin-bottom:5px;" id="cfg-value-label">
                     VLAN<span id="plural-s"></span>
                 </label>
                 <input type="text" id="cfg-vlans" placeholder="e.g. 20 or 10,20,30"
@@ -318,11 +327,18 @@ function updatePreview() {
     const preview = document.getElementById('cmd-preview');
     const btn    = document.getElementById('apply-btn');
 
+    const isIpMode = mode === 'ip-add' || mode === 'ip-remove';
+
+    // Update label
+    document.getElementById('cfg-value-label').firstChild.textContent =
+        isIpMode ? 'IP Address (CIDR)' : (mode === 'access' ? 'VLAN' : 'VLANs');
+    document.getElementById('cfg-vlans').placeholder =
+        isIpMode ? 'e.g. 10.0.254.5/30' : (mode === 'access' ? 'e.g. 20' : 'e.g. 10,20,30');
+    document.getElementById('plural-s').textContent = '';
+
     // Show/hide description field
     document.getElementById('desc-wrap').style.display =
-        mode === 'trunk-remove' ? 'none' : 'block';
-    document.getElementById('plural-s').textContent =
-        mode === 'access' ? '' : 's';
+        (mode === 'trunk-remove' || isIpMode) ? 'none' : 'block';
 
     if (!iface || !vlans) {
         preview.textContent = 'Fill in the form to preview commands';
@@ -349,6 +365,17 @@ function updatePreview() {
         lines = [
             `interface ${iface}`,
             `   switchport trunk allowed vlan remove ${vlans}`,
+        ];
+    } else if (mode === 'ip-add') {
+        lines = [
+            `interface ${iface}`,
+            `   no switchport`,
+            `   ip address ${vlans}`,
+        ];
+    } else if (mode === 'ip-remove') {
+        lines = [
+            `interface ${iface}`,
+            `   no ip address ${vlans}`,
         ];
     }
 
@@ -386,10 +413,17 @@ function applyConfig() {
         addField('interface', iface);
         addField('vlans', vlans);
     } else if (mode === 'trunk-remove') {
-        // remove each VID one by one — submit first, rest handled server-side
         const vids = vlans.split(',').map(v => v.trim()).filter(Boolean);
         form.action = `/ui/devices/{{ device_name }}/vlans/${vids[0]}/remove_from_port`;
         addField('interface', iface);
+    } else if (mode === 'ip-add') {
+        form.action = `/ui/devices/{{ device_name }}/ip/add`;
+        addField('interface', iface);
+        addField('address', vlans);
+    } else if (mode === 'ip-remove') {
+        form.action = `/ui/devices/{{ device_name }}/ip/remove`;
+        addField('interface', iface);
+        addField('address', vlans);
     }
 
     document.body.appendChild(form);
