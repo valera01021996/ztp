@@ -122,8 +122,11 @@ def ui_device_manage(request: Request, device_name: str,
     try:
         if platform == "eos":
             result = get_eapi(device).run(["enable", "show ip ospf interface"])
-            ospf_error = f"DEBUG result[1] keys: {list(result[1].keys()) if result and len(result) > 1 else result}"
-            for iface_name, data in result[1].get("interfaces", {}).items():
+            # EOS wraps interfaces under vrfs -> <vrf> -> interfaces
+            all_ifaces = {}
+            for vrf_data in result[1].get("vrfs", {}).values():
+                all_ifaces.update(vrf_data.get("interfaces", {}))
+            for iface_name, data in all_ifaces.items():
                 ospf_ifaces[iface_name] = {
                     "area":         data.get("area", ""),
                     "network_type": data.get("networkType", ""),
