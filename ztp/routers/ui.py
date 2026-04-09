@@ -126,7 +126,7 @@ def ui_device_manage(request: Request, device_name: str,
             all_ifaces = {}
             for vrf_data in result[1].get("vrfs", {}).values():
                 all_ifaces.update(vrf_data.get("interfaces", {}))
-            ospf_error = f"DEBUG ospf ifaces: {list(all_ifaces.keys())}"
+            ospf_error = f"DEBUG: {result[1]}"
             for iface_name, data in all_ifaces.items():
                 ospf_ifaces[iface_name] = {
                     "area":         data.get("area", ""),
