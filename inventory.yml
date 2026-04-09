@@ -153,8 +153,9 @@ devices:
 
       - name: Management1
         type: 1000base-t
-        ip: 192.168.1.102/24
+        ip: 192.168.1.100/24
         primary: true
+        gateway: 192.168.1.1
         description: Management
 
       - name: Loopback0
@@ -528,7 +529,8 @@ devices:
 
       - name: Management1
         type: 1000base-t
-        ip: 192.168.1.100/24
+        ip: 192.168.1.102/24
+        gateway: 192.168.1.1
         primary: true
         description: Management
 
@@ -626,6 +628,7 @@ devices:
       - name: Management1
         type: 1000base-t
         ip: 192.168.1.103/24
+        gateway: 192.168.1.1
         primary: true
         description: Management
 

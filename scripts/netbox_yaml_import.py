@@ -260,6 +260,7 @@ class YAMLInventoryImport(Script):
             face = entry.get("rackface", "front")
             height = entry.get("height", 1)
             status = entry.get("status", "active")
+            already_deployed = entry.get("deployed", False)
 
             if dry:
                 self.log_success(f"[DRY] Создал бы Device: {name} (site={site_name})")
@@ -303,7 +304,7 @@ class YAMLInventoryImport(Script):
                         status=status,
                     )
                     self.log_success(f"Создано устройство: {name}")
-                    self._tag_if_network(device, platform_name, role_name)
+                    self._tag_if_network(device, platform_name, role_name, already_deployed)
                 except Exception as e:
                     self.log_failure(f"Ошибка создания {name}: {e}")
                     continue
@@ -320,12 +321,18 @@ class YAMLInventoryImport(Script):
         device.save()
         self.log_success(f"  Config context загружен → {device.name}")
 
-    def _tag_if_network(self, device: Device, platform_name: str, role_name: str):
+    def _tag_if_network(self, device: Device, platform_name: str, role_name: str,
+                        already_deployed: bool = False):
         role_slug = slugify(role_name) if role_name else ""
         if role_slug not in SERVER_ROLE_SLUGS and (platform_name or "").lower() in NETWORK_PLATFORMS:
-            tag = _get_or_create_tag("config-pending", "config-pending", "ff9800")
-            device.tags.add(tag)
-            self.log_success(f"  Тег 'config-pending' → {device.name}")
+            if already_deployed:
+                tag = _get_or_create_tag("config-deployed", "config-deployed", "4caf50")
+                device.tags.add(tag)
+                self.log_success(f"  Тег 'config-deployed' → {device.name}")
+            else:
+                tag = _get_or_create_tag("config-pending", "config-pending", "ff9800")
+                device.tags.add(tag)
+                self.log_success(f"  Тег 'config-pending' → {device.name}")
 
     # ── Interfaces ────────────────────────────────────────────────────────────
 
