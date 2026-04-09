@@ -194,8 +194,9 @@ def ui_trunk(device_name: str, interface: str = Form(...), vlans: str = Form(...
         current_vids = {v.id for v in (nb_iface.tagged_vlans or [])}
         for vid in vlan_list:
             vlan_obj = next(iter(nb.ipam.vlans.filter(vid=vid)), None)
-            if vlan_obj:
-                current_vids.add(vlan_obj.id)
+            if not vlan_obj:
+                vlan_obj = nb.ipam.vlans.create({"vid": vid, "name": f"VLAN{vid}"})
+            current_vids.add(vlan_obj.id)
         nb_iface.update({"mode": "tagged", "tagged_vlans": list(current_vids)})
 
         if platform == "comware":
@@ -223,13 +224,14 @@ def ui_access(device_name: str, interface: str = Form(...),
         platform = get_platform(device)
 
         vlan_obj = next(iter(nb.ipam.vlans.filter(vid=vlan)), None)
+        if not vlan_obj:
+            vlan_obj = nb.ipam.vlans.create({"vid": vlan, "name": f"VLAN{vlan}"})
+
         nb_iface = nb.dcim.interfaces.get(device_id=device.id, name=interface)
         if not nb_iface:
             nb_iface = nb.dcim.interfaces.create(device=device.id, name=interface, type="1000base-t")
 
-        update = {"mode": "access"}
-        if vlan_obj:
-            update["untagged_vlan"] = vlan_obj.id
+        update = {"mode": "access", "untagged_vlan": vlan_obj.id}
         if description:
             update["description"] = description
         nb_iface.update(update)
