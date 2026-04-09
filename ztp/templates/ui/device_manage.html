@@ -156,7 +156,7 @@
                 <th>Trunk VLANs</th>
                 <th>IP Address</th>
                 <th>MTU</th>
-                <th>OSPF</th>
+                <th>OSPF {% if ospf_error %}<span style="color:#f87171; font-size:10px; font-weight:400;" title="{{ ospf_error }}">⚠ error</span>{% endif %}</th>
             </tr>
         </thead>
         <tbody>

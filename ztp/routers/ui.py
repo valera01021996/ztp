@@ -118,6 +118,7 @@ def ui_device_manage(request: Request, device_name: str,
     # Fetch OSPF interface state from switch
     platform = get_platform(device)
     ospf_ifaces: dict[str, dict] = {}
+    ospf_error: str = ""
     try:
         if platform == "eos":
             result = get_eapi(device).run(["enable", "show ip ospf interface"])
@@ -128,8 +129,8 @@ def ui_device_manage(request: Request, device_name: str,
                     "state":        data.get("interfaceState", ""),
                     "up":           data.get("ospfEnabled", False) and data.get("interfaceState", "") not in ("", "down"),
                 }
-    except Exception:
-        pass
+    except Exception as e:
+        ospf_error = str(e)
 
     # Merge OSPF data into interfaces
     for iface in interfaces:
@@ -144,6 +145,7 @@ def ui_device_manage(request: Request, device_name: str,
         "primary_ip": str(device.primary_ip4).split("/")[0] if device.primary_ip4 else "—",
         "vlans":      vlans,
         "interfaces": interfaces,
+        "ospf_error": ospf_error,
         "error":      error,
         "success":    success,
         "active":     "devices",
