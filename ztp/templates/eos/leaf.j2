@@ -44,7 +44,9 @@ interface {{ iface.name }}
 {% if iface.lag %}
    channel-group {{ iface.lag.lag_id }} mode active
 {% else %}
+{% if iface.name is match('^Ethernet') %}
    no switchport
+{% endif %}
    ip address {{ iface.ip_address }}
 {% if iface.mtu %}
    mtu {{ iface.mtu }}
