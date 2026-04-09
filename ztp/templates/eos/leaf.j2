@@ -49,6 +49,13 @@ interface {{ iface.name }}
 {% if iface.mtu %}
    mtu {{ iface.mtu }}
 {% endif %}
+{% if ospf_ifaces and iface.name in ospf_ifaces %}
+   ip ospf area {{ ospf_ifaces[iface.name].area | default('0.0.0.0') }}
+{% if ospf_ifaces[iface.name].network_type %}
+   ip ospf network {{ ospf_ifaces[iface.name].network_type }}
+{% endif %}
+   no passive-interface
+{% endif %}
 {% endif %}
    {{ 'no shutdown' if iface.enabled else 'shutdown' }}
 !
@@ -139,26 +146,10 @@ router ospf {{ ospf.process_id | default(1) }}
 {% if ospf.passive_default %}
    passive-interface default
 {% endif %}
-{% for iface in routed_ifaces %}
-{% if iface.name in ospf_ifaces %}
-   network {{ iface.ip_address }} area {{ ospf_ifaces[iface.name].area | default('0.0.0.0') }}
-{% endif %}
-{% endfor %}
 {% if ospf.max_lsa %}
    max-lsa {{ ospf.max_lsa }}
 {% endif %}
 !
-{% for iface in routed_ifaces %}
-{% if iface.name in ospf_ifaces %}
-interface {{ iface.name }}
-   ip ospf area {{ ospf_ifaces[iface.name].area | default('0.0.0.0') }}
-{% if ospf_ifaces[iface.name].network_type %}
-   ip ospf network {{ ospf_ifaces[iface.name].network_type }}
-{% endif %}
-   no passive-interface
-!
-{% endif %}
-{% endfor %}
 {% endif %}
 {% if bgp %}
 ! === BGP ===
