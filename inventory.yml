@@ -227,6 +227,7 @@ devices:
         type: lag
         mode: lacp
         mtu: 9214
+        mlag: true
         description: SRV1
         untagged_vlan: 20
         members:
@@ -236,6 +237,7 @@ devices:
         type: lag
         mode: lacp
         mtu: 9214
+        mlag: true
         description: SRV2
         untagged_vlan: 20
         members:
@@ -245,6 +247,7 @@ devices:
         type: lag
         mode: lacp
         mtu: 9214
+        mlag: true
         description: SRV3
         untagged_vlan: 20
         members:
@@ -254,6 +257,7 @@ devices:
         type: lag
         mode: lacp
         mtu: 9214
+        mlag: true
         description: SRV4
         untagged_vlan: 20
         members:
@@ -263,6 +267,7 @@ devices:
         type: lag
         mode: lacp
         mtu: 9214
+        mlag: true
         description: SRV5
         untagged_vlan: 20
         members:
@@ -272,6 +277,7 @@ devices:
         type: lag
         mode: lacp
         mtu: 9214
+        mlag: true
         description: SRV6
         untagged_vlan: 20
         members:
@@ -281,6 +287,7 @@ devices:
         type: lag
         mode: lacp
         mtu: 9214
+        mlag: true
         description: SRV7
         untagged_vlan: 20
         members:
@@ -290,6 +297,7 @@ devices:
         type: lag
         mode: lacp
         mtu: 9214
+        mlag: true
         description: SRV8
         untagged_vlan: 20
         members:
@@ -299,6 +307,7 @@ devices:
         type: lag
         mode: lacp
         mtu: 9214
+        mlag: true
         description: SRV9
         untagged_vlan: 20
         members:
@@ -308,6 +317,7 @@ devices:
         type: lag
         mode: lacp
         mtu: 9214
+        mlag: true
         description: SRV10
         untagged_vlan: 20
         members:
@@ -317,6 +327,7 @@ devices:
         type: lag
         mode: lacp
         mtu: 9214
+        mlag: true
         description: SRV11
         untagged_vlan: 20
         members:
@@ -326,6 +337,7 @@ devices:
         type: lag
         mode: lacp
         mtu: 9214
+        mlag: true
         description: SRV12
         untagged_vlan: 20
         members:
@@ -335,6 +347,7 @@ devices:
         type: lag
         mode: lacp
         mtu: 9214
+        mlag: true
         description: SRV13
         untagged_vlan: 20
         members:
@@ -344,6 +357,7 @@ devices:
         type: lag
         mode: lacp
         mtu: 9214
+        mlag: true
         description: SRV14
         untagged_vlan: 20
         members:
@@ -353,6 +367,7 @@ devices:
         type: lag
         mode: lacp
         mtu: 9214
+        mlag: true
         description: SRV15
         untagged_vlan: 20
         members:
@@ -362,6 +377,7 @@ devices:
         type: lag
         mode: lacp
         mtu: 9214
+        mlag: true
         description: SRV16
         untagged_vlan: 20
         members:
@@ -371,6 +387,7 @@ devices:
         type: lag
         mode: lacp
         mtu: 9214
+        mlag: true
         description: SRV17
         untagged_vlan: 20
         members:
@@ -380,6 +397,7 @@ devices:
         type: lag
         mode: lacp
         mtu: 9214
+        mlag: true
         description: SRV18
         untagged_vlan: 20
         members:
@@ -389,6 +407,7 @@ devices:
         type: lag
         mode: lacp
         mtu: 9214
+        mlag: true
         description: SRV19
         untagged_vlan: 20
         members:
@@ -398,6 +417,7 @@ devices:
         type: lag
         mode: lacp
         mtu: 9214
+        mlag: true
         description: SRV20
         untagged_vlan: 20
         members:
@@ -407,6 +427,7 @@ devices:
         type: lag
         mode: lacp
         mtu: 9214
+        mlag: true
         description: SRV21
         untagged_vlan: 20
         members:
@@ -416,6 +437,7 @@ devices:
         type: lag
         mode: lacp
         mtu: 9214
+        mlag: true
         description: SRV22
         untagged_vlan: 20
         members:
@@ -425,6 +447,7 @@ devices:
         type: lag
         mode: lacp
         mtu: 9214
+        mlag: true
         description: SRV23
         untagged_vlan: 20
         members:
@@ -434,6 +457,7 @@ devices:
         type: lag
         mode: lacp
         mtu: 9214
+        mlag: true
         description: SRV24
         untagged_vlan: 20
         members:
@@ -443,6 +467,7 @@ devices:
         type: lag
         mode: lacp
         mtu: 9214
+        mlag: true
         description: SRV25
         untagged_vlan: 20
         members:
@@ -452,6 +477,7 @@ devices:
         type: lag
         mode: lacp
         mtu: 9214
+        mlag: true
         description: SRV26
         untagged_vlan: 20
         members:

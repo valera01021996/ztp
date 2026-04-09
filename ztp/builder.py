@@ -78,6 +78,12 @@ def build_config(nb, device, day0_only: bool = False) -> str:
             d["ip_address"] = ip_by_iface[iface.id]
         if iface.name in lag_member_map:
             d["lag"] = lag_member_map[iface.name]
+        # MLAG ID — только если интерфейс помечен тегом mlag-portchannel
+        iface_tag_slugs = [t.slug for t in (iface.tags or [])]
+        if "mlag-portchannel" in iface_tag_slugs:
+            m_pc = re.match(r'^Port-Channel(\d+)$', iface.name)
+            if m_pc:
+                d["mlag_id"] = int(m_pc.group(1))
         interfaces.append(d)
 
     # VLANs

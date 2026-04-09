@@ -418,6 +418,7 @@ class YAMLInventoryImport(Script):
             members = entry.get("members", [])
             untagged_vid = entry.get("untagged_vlan")
             tagged_vids = entry.get("tagged_vlans", [])
+            is_mlag = entry.get("mlag", False)
 
             # Определяем switchport mode
             nb_mode = ""
@@ -457,6 +458,14 @@ class YAMLInventoryImport(Script):
 
             if tagged_vlans:
                 lag_iface.tagged_vlans.set(tagged_vlans)
+
+            # Тег mlag-portchannel
+            mlag_tag = _get_or_create_tag("mlag-portchannel", "mlag-portchannel", "2196f3")
+            if is_mlag:
+                lag_iface.tags.add(mlag_tag)
+                self.log_info(f"  Тег mlag-portchannel → {pc_name}")
+            else:
+                lag_iface.tags.remove(mlag_tag)
 
             # Привязываем member-интерфейсы к LAG
             for member_name in members:

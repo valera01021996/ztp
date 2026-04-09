@@ -26,8 +26,14 @@ def init_db():
                 current_config TEXT,
                 diff TEXT,
                 error TEXT,
+                check_result TEXT,
                 created_at TEXT DEFAULT (datetime('now', 'localtime')),
                 updated_at TEXT DEFAULT (datetime('now', 'localtime'))
             )
         """)
+        # Migration: add check_result to existing DB
+        try:
+            conn.execute("ALTER TABLE pipeline_runs ADD COLUMN check_result TEXT")
+        except Exception:
+            pass
         conn.commit()

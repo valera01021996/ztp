@@ -1,3 +1,5 @@
+import time
+import json
 import difflib
 import logging
 from fastapi import HTTPException
@@ -77,6 +79,48 @@ def create_pipeline_run(device, platform: str, generated: str, current: str,
         run_id = cur.lastrowid
         conn.commit()
     return run_id
+
+
+def post_deploy_check(device) -> dict:
+    """Проверяем BGP и OSPF состояние после деплоя."""
+    platform = get_platform(device)
+    if platform != "eos":
+        return {"supported": False}
+
+    time.sleep(8)  # даём протоколам секунды на сходимость
+
+    try:
+        eapi = get_eapi(device)
+        results = eapi.run(["enable", "show bgp summary", "show ip ospf neighbor"])
+
+        # BGP peers
+        bgp_peers = []
+        vrfs = results[1].get("vrfs", {})
+        for peer_ip, info in vrfs.get("default", {}).get("peers", {}).items():
+            state = info.get("peerState", "Unknown")
+            bgp_peers.append({"peer": peer_ip, "state": state, "up": state == "Established"})
+
+        # OSPF neighbors
+        ospf_neighbors = []
+        for inst in results[2].get("vrfs", {}).get("default", {}).get("instList", {}).values():
+            for entry in inst.get("ospfNeighborEntries", []):
+                state = entry.get("adjacencyState", "?")
+                ospf_neighbors.append({
+                    "neighbor": entry.get("routerId", "?"),
+                    "interface": entry.get("interfaceAddress", "?"),
+                    "state": state,
+                    "up": state == "full",
+                })
+
+        all_up = (
+            all(p["up"] for p in bgp_peers) and
+            all(n["up"] for n in ospf_neighbors)
+        )
+        return {"bgp": bgp_peers, "ospf": ospf_neighbors, "all_up": all_up}
+
+    except Exception as e:
+        logging.warning("post_deploy_check failed: %s", e)
+        return {"error": str(e)}
 
 
 def deploy_config_replace(device, config: str):

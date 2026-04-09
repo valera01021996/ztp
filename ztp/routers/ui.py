@@ -11,6 +11,7 @@ from database import get_db
 
 router = APIRouter()
 ui_templates = Jinja2Templates(directory=UI_TEMPLATES_DIR)
+ui_templates.env.filters["tojson_load"] = __import__("json").loads
 
 
 @router.get("/ui", response_class=HTMLResponse)
@@ -239,23 +240,27 @@ def ui_approve(run_id: int):
     device = get_device_by_name(nb, run["device_name"])
     error  = None
 
+    check_result = None
     try:
         deploy_config(device, run["generated_config"])
         status = "deployed"
         # Обновляем теги в NetBox
-        from pipeline import get_or_create_tag
+        from pipeline import get_or_create_tag, post_deploy_check
         current_tags = [t for t in (device.tags or []) if t.slug not in ("config-pending", "day0-deployed")]
         deployed_tag = get_or_create_tag(nb, "config-deployed", "config-deployed", "4caf50")
         current_tags.append(deployed_tag)
         device.update({"tags": [{"id": t.id} for t in current_tags]})
+        # Проверяем состояние BGP/OSPF после деплоя
+        import json
+        check_result = json.dumps(post_deploy_check(device), ensure_ascii=False)
     except Exception as e:
         error  = str(e)
         status = "failed"
 
     with get_db() as conn:
         conn.execute(
-            "UPDATE pipeline_runs SET status=?, error=?, updated_at=datetime('now','localtime') WHERE id=?",
-            (status, error, run_id)
+            "UPDATE pipeline_runs SET status=?, error=?, check_result=?, updated_at=datetime('now','localtime') WHERE id=?",
+            (status, error, check_result, run_id)
         )
         conn.commit()
 

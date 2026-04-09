@@ -90,6 +90,9 @@ interface {{ iface.name }}
 {% elif iface.mode == 'tagged-all' %}
    switchport mode trunk
 {% endif %}
+{% if mlag and iface.mlag_id %}
+   mlag {{ iface.mlag_id }}
+{% endif %}
    {{ 'no shutdown' if iface.enabled else 'shutdown' }}
 !
 {% endfor %}
