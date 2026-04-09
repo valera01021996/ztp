@@ -139,25 +139,40 @@ def ui_remove_vlan_from_port(device_name: str, vid: int, interface: str = Form(.
 
         # Update NetBox interface
         nb_iface = nb.dcim.interfaces.get(device_id=device.id, name=interface)
+        is_access = False
         if nb_iface:
             if nb_iface.untagged_vlan and nb_iface.untagged_vlan.vid == vid:
+                is_access = True
                 nb_iface.update({"untagged_vlan": None, "mode": None})
             else:
                 new_tagged = [v.id for v in (nb_iface.tagged_vlans or []) if v.vid != vid]
                 nb_iface.update({"tagged_vlans": new_tagged})
 
-        # Update switch
+        # Update switch — different command for access vs trunk
         if platform == "comware":
-            get_h3c(device)._cli([
-                f"interface {interface}",
-                f"undo port trunk permit vlan {vid}",
-            ])
+            if is_access:
+                get_h3c(device)._cli([
+                    f"interface {interface}",
+                    "undo port access vlan",
+                ])
+            else:
+                get_h3c(device)._cli([
+                    f"interface {interface}",
+                    f"undo port trunk permit vlan {vid}",
+                ])
         else:
-            get_eapi(device).run([
-                "enable", "configure",
-                f"interface {interface}",
-                f"switchport trunk allowed vlan remove {vid}",
-            ])
+            if is_access:
+                get_eapi(device).run([
+                    "enable", "configure",
+                    f"interface {interface}",
+                    "no switchport access vlan",
+                ])
+            else:
+                get_eapi(device).run([
+                    "enable", "configure",
+                    f"interface {interface}",
+                    f"switchport trunk allowed vlan remove {vid}",
+                ])
 
         return RedirectResponse(f"/ui/devices/{device_name}?success=VLAN+{vid}+removed+from+{interface}", status_code=303)
     except Exception as e:
