@@ -44,8 +44,8 @@ def ztp_done(serial: str):
     if not device:
         raise HTTPException(status_code=404, detail=f"serial={serial} не найден")
     tags = [t for t in (device.tags or []) if t.slug != "config-pending"]
-    deployed_tag = get_or_create_tag(nb, "config-deployed", "config-deployed", "4caf50")
-    tags.append(deployed_tag)
+    day0_tag = get_or_create_tag(nb, "day0-deployed", "day0-deployed", "2196f3")
+    tags.append(day0_tag)
     device.update({"tags": [{"id": t.id} for t in tags], "status": "active"})
     return {"status": "ok", "device": device.name}
 

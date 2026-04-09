@@ -242,6 +242,12 @@ def ui_approve(run_id: int):
     try:
         deploy_config(device, run["generated_config"])
         status = "deployed"
+        # Обновляем теги в NetBox
+        from pipeline import get_or_create_tag
+        current_tags = [t for t in (device.tags or []) if t.slug not in ("config-pending", "day0-deployed")]
+        deployed_tag = get_or_create_tag(nb, "config-deployed", "config-deployed", "4caf50")
+        current_tags.append(deployed_tag)
+        device.update({"tags": [{"id": t.id} for t in current_tags]})
     except Exception as e:
         error  = str(e)
         status = "failed"
