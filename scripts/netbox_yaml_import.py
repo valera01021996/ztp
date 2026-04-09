@@ -348,7 +348,10 @@ class YAMLInventoryImport(Script):
             tagged_vids = entry.get("tagged_vlans", [])
             ip_addr = entry.get("ip")
             is_primary = entry.get("primary", False)
-            is_anycast = entry.get("anycast", False)
+            # SVI с VRF — anycast gateway IP (одинаковый на всех листьях в VXLAN)
+            is_anycast = entry.get("anycast", False) or bool(
+                vrf_name and re.match(r'^[Vv]lan\d+', iface_name)
+            )
 
             # Определяем mode для NetBox
             nb_mode = ""

@@ -109,15 +109,21 @@
 
         document.querySelectorAll('form[data-loading]').forEach(function (form) {
             form.addEventListener('submit', function (e) {
-                // onsubmit confirm dialogs — if cancelled, don't show overlay
+                e.preventDefault();
+
                 if (form.dataset.confirm) {
                     if (!confirm(form.dataset.confirm)) {
-                        e.preventDefault();
                         return;
                     }
                 }
+
                 loadingText.textContent = form.dataset.loading || 'Processing';
                 overlay.classList.add('active');
+
+                // Даём браузеру отрендерить overlay перед сабмитом
+                requestAnimationFrame(function () {
+                    form.submit();
+                });
             });
         });
     });

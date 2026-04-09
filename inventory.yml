@@ -544,8 +544,6 @@ devices:
         vlan_vnis:
           - vlan: 20
             vni: 10020
-          - vlan: 36
-            vni: 10036
         flood_vteps:
           - 2.2.1.1                   # Loopback1 anycast MLAG пары Leaf-1/Leaf-2
           - 1.1.1.4                   # Loopback0 Leaf-4 (standalone)
