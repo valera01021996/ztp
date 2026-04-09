@@ -85,7 +85,7 @@ def deploy_config(device, config: str):
         cmds = ["enable", "configure terminal"]
         for line in config.splitlines():
             stripped = line.strip()
-            if stripped and not stripped.startswith("!"):
+            if stripped and not stripped.startswith("!") and stripped != "end":
                 cmds.append(stripped)
         cmds.append("end")
         cmds.append("write memory")
