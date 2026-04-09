@@ -125,8 +125,8 @@ def ui_device_manage(request: Request, device_name: str,
             # EOS wraps interfaces under vrfs -> <vrf> -> interfaces
             all_ifaces = {}
             for vrf_data in result[1].get("vrfs", {}).values():
-                all_ifaces.update(vrf_data.get("interfaces", {}))
-            ospf_error = f"DEBUG: {result[1]}"
+                for inst_data in vrf_data.get("instList", {}).values():
+                    all_ifaces.update(inst_data.get("interfaces", {}))
             for iface_name, data in all_ifaces.items():
                 ospf_ifaces[iface_name] = {
                     "area":         data.get("area", ""),
