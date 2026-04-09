@@ -52,23 +52,32 @@ def ui_device_manage(request: Request, device_name: str,
                      error: str = None, success: str = None):
     nb = get_nb()
     device = get_device_by_name(nb, device_name)
-    # Collect VLANs with interface assignments
+    # Collect VLANs and ports from NetBox interfaces
     vlans = []
+    ports = []
     try:
-        # vid -> {name, interfaces: [{name, mode}]}
-        vid_map: dict[int, dict] = {}
+        vid_map: dict[int, str] = {}
         for iface in nb.dcim.interfaces.filter(device_id=device.id):
+            mode_obj = getattr(iface, 'mode', None)
+            mode = mode_obj.value if mode_obj else None
+            if not mode:
+                continue
+            port_vlans = []
             if iface.untagged_vlan and getattr(iface.untagged_vlan, 'vid', None):
                 v = iface.untagged_vlan
-                vid_map.setdefault(v.vid, {"name": v.name, "interfaces": []})
-                vid_map[v.vid]["interfaces"].append({"name": iface.name, "mode": "access"})
+                vid_map.setdefault(v.vid, v.name)
+                port_vlans.append({"vid": v.vid, "name": v.name})
             for v in (iface.tagged_vlans or []):
-                vid_map.setdefault(v.vid, {"name": v.name, "interfaces": []})
-                vid_map[v.vid]["interfaces"].append({"name": iface.name, "mode": "trunk"})
-        vlans = [
-            {"vid": vid, "name": d["name"], "interfaces": d["interfaces"]}
-            for vid, d in sorted(vid_map.items())
-        ]
+                if getattr(v, 'vid', None):
+                    vid_map.setdefault(v.vid, v.name)
+                    port_vlans.append({"vid": v.vid, "name": v.name})
+            ports.append({"name": iface.name, "mode": mode, "vlans": port_vlans})
+
+        vlans = [{"vid": vid, "name": name} for vid, name in sorted(vid_map.items())]
+        ports.sort(key=lambda p: (
+            0 if p["name"].startswith("Port-Channel") else 1,
+            int(''.join(filter(str.isdigit, p["name"])) or 0),
+        ))
     except Exception:
         pass
 
@@ -80,6 +89,7 @@ def ui_device_manage(request: Request, device_name: str,
         "role":       role_obj.name if role_obj else "—",
         "primary_ip": str(device.primary_ip4).split("/")[0] if device.primary_ip4 else "—",
         "vlans":      vlans,
+        "ports":      ports,
         "error":      error,
         "success":    success,
         "active":     "devices",
