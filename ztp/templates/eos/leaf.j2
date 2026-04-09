@@ -25,7 +25,7 @@ ip virtual-router mac-address {{ ip_virtual_router_mac }}
 {% endif %}
 {% set switchport_ifaces = interfaces | selectattr('mode') | list %}
 {% set svi_ifaces = interfaces | selectattr('name', 'match', '^Vlan') | list %}
-{% set routed_ifaces = interfaces | rejectattr('mode') | rejectattr('name', 'match', '^Vlan') | list %}
+{% set routed_ifaces = interfaces | rejectattr('mode') | rejectattr('name', 'match', '^Vlan') | rejectattr('name', 'match', '^Management') | list %}
 {% if vlans %}
 ! === VLANs ===
 {% for vlan in vlans %}
