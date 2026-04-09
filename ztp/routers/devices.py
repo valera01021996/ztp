@@ -170,3 +170,64 @@ def set_access_port(name: str, body: AccessIn):
         get_eapi(device).run(cmds)
 
     return {"status": "ok", "interface": body.interface, "vlan": body.vlan}
+
+
+@router.post("/{name}/rollback")
+def rollback_to_day0(name: str):
+    """Откатить до Day0 конфига (base.j2) — только hostname, mgmt, SSH, eAPI."""
+    from builder import build_config
+    from pipeline import deploy_config
+
+    nb = get_nb()
+    device = get_device_by_name(nb, name)
+    platform = get_platform(device)
+
+    if platform != "eos":
+        raise HTTPException(status_code=400, detail="Rollback поддерживается только для EOS")
+
+    config = build_config(nb, device, day0_only=True)
+    deploy_config(device, config)
+    return {"status": "ok", "device": name, "message": "Rolled back to Day0 config"}
+
+
+@router.post("/{name}/reset")
+def reset_config(name: str):
+    """Сбросить конфиг до минимального (hostname + mgmt) для тестирования."""
+    nb = get_nb()
+    device = get_device_by_name(nb, name)
+    platform = get_platform(device)
+
+    if platform != "eos":
+        raise HTTPException(status_code=400, detail="Reset поддерживается только для EOS")
+
+    if not device.primary_ip4:
+        raise HTTPException(status_code=400, detail="primary_ip4 не задан")
+
+    mgmt_ip = str(device.primary_ip4)
+    import ipaddress
+    gw = str(next(ipaddress.ip_interface(mgmt_ip).network.hosts()))
+
+    clean_config = f"""hostname {device.name}
+username admin privilege 15 role network-admin secret 0 admin
+aaa authentication login default local
+management ssh
+   no shutdown
+management api http-commands
+   protocol http
+   no shutdown
+interface Management1
+   ip address {mgmt_ip}
+   no shutdown
+ip route 0.0.0.0/0 {gw}
+"""
+
+    cmds = ["enable", "configure terminal"]
+    for line in clean_config.splitlines():
+        stripped = line.strip()
+        if stripped:
+            cmds.append(stripped)
+    cmds.append("end")
+    cmds.append("write memory")
+
+    get_eapi(device).run(cmds)
+    return {"status": "ok", "device": name, "message": "Config reset to minimal"}

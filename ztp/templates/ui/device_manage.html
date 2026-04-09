@@ -11,6 +11,10 @@
         <form method="post" action="/ui/generate/{{ device_name }}">
             <button type="submit" class="btn btn-primary btn-sm">Generate Config</button>
         </form>
+        <form method="post" action="/ui/devices/{{ device_name }}/rollback"
+              onsubmit="return confirm('Откатить до Day0? Весь Day1 конфиг будет удалён.')">
+            <button type="submit" class="btn btn-danger btn-sm">↩ Rollback to Day0</button>
+        </form>
         <a href="/ui/devices" class="btn btn-sm" style="background:#334155; color:#94a3b8;">← Back</a>
     </div>
 </div>
