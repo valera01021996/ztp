@@ -325,8 +325,16 @@ const DEV = '{{ device_name }}';
 
 function currentConfigLines(d) {
     const lines = [`interface ${d.name}`];
-    if (d.description)  lines.push(`   description ${d.description}`);
-    if (d.mtu)          lines.push(`   mtu ${d.mtu}`);
+    if (d.description) lines.push(`   description ${d.description}`);
+    if (d.mtu)         lines.push(`   mtu ${d.mtu}`);
+    if (d.enabled === false) lines.push(`   shutdown`);
+
+    // LAG membership: extract channel-group number from lag name (e.g. "Port-Channel3" → 3)
+    if (d.lag) {
+        const num = d.lag.replace(/\D/g, '');
+        if (num) lines.push(`   channel-group ${num} mode active`);
+    }
+
     if (d.mode === 'access' && d.untagged) {
         lines.push(`   switchport mode access`);
         lines.push(`   switchport access vlan ${d.untagged.vid}`);
@@ -335,12 +343,15 @@ function currentConfigLines(d) {
         if (d.tagged && d.tagged.length)
             lines.push(`   switchport trunk allowed vlan ${d.tagged.map(v => v.vid).join(',')}`);
     }
+
     if (d.ips && d.ips.length) {
         lines.push(`   no switchport`);
         d.ips.forEach(ip => lines.push(`   ip address ${ip.address}`));
     }
-    if (!d.description && !d.mtu && !d.mode && (!d.ips || !d.ips.length))
-        lines.push(`   ! (no L2/L3 config in NetBox)`);
+
+    const hasConfig = d.description || d.mtu || d.mode || d.lag || (d.ips && d.ips.length) || d.enabled === false;
+    if (!hasConfig) lines.push(`   ! (no config in NetBox)`);
+
     lines.push('!');
     return lines.join('\n');
 }
