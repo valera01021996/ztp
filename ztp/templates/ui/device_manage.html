@@ -213,18 +213,25 @@
     </div>
 </details>
 
+<!-- Interface modal backdrop -->
+<div id="iface-backdrop" onclick="closeModal()" style="
+    display:none; position:fixed; inset:0;
+    background:rgba(0,0,0,0.6); z-index:1000;
+    align-items:center; justify-content:center;
+"></div>
+
 <!-- Interface modal -->
-<dialog id="iface-modal" style="
+<div id="iface-modal" style="
+    display:none; position:fixed;
+    top:50%; left:50%; transform:translate(-50%,-50%);
     background: var(--surface);
     border: 1px solid var(--border2);
     border-radius: 12px;
-    padding: 0;
-    width: 820px;
-    max-width: 95vw;
-    max-height: 90vh;
+    width: 820px; max-width: 95vw; max-height: 90vh;
     overflow: hidden;
     color: var(--text);
     box-shadow: 0 24px 64px rgba(0,0,0,0.6);
+    z-index: 1001;
 ">
 <div style="display:flex;flex-direction:column;height:100%;max-height:90vh;">
 
@@ -234,7 +241,7 @@
             <span id="m-name" class="mono" style="font-size:16px;font-weight:700;color:var(--text);"></span>
             <span id="m-desc-hint" class="meta" style="margin-left:10px;font-size:13px;"></span>
         </div>
-        <button onclick="document.getElementById('iface-modal').close()"
+        <button onclick="closeModal()"
                 style="background:none;border:none;color:var(--text3);font-size:20px;cursor:pointer;padding:4px 8px;line-height:1;">×</button>
     </div>
 
@@ -298,7 +305,7 @@
             </div>
             <div style="display:flex;gap:10px;margin-top:auto;padding-top:12px;">
                 <button class="btn btn-success" id="m-apply-btn" onclick="modalApply()" disabled style="flex:1;">✓ Apply to device</button>
-                <button class="btn btn-ghost" onclick="document.getElementById('iface-modal').close()">Cancel</button>
+                <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
             </div>
         </div>
     </div>
@@ -341,7 +348,15 @@ function openModal(row) {
     }
 
     modalPreview();
-    document.getElementById('iface-modal').showModal();
+    document.getElementById('iface-backdrop').style.display = 'flex';
+    document.getElementById('iface-modal').style.display = 'block';
+    document.body.style.overflow = 'hidden';
+}
+
+function closeModal() {
+    document.getElementById('iface-backdrop').style.display = 'none';
+    document.getElementById('iface-modal').style.display = 'none';
+    document.body.style.overflow = '';
 }
 
 document.getElementById('m-l2-action').addEventListener('change', function() {
@@ -467,10 +482,8 @@ function removeIp(address) {
     f.submit();
 }
 
-// Close modal on backdrop click
-document.getElementById('iface-modal').addEventListener('click', function(e) {
-    if (e.target === this) this.close();
-});
+// Close on Escape key
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
 </script>
 
 {% endblock %}
