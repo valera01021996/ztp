@@ -329,12 +329,13 @@ function currentConfigLines(d) {
     if (d.mtu)         lines.push(`   mtu ${d.mtu}`);
     if (d.enabled === false) lines.push(`   shutdown`);
 
-    // LAG membership: extract channel-group number from lag name (e.g. "Port-Channel3" → 3)
+    // LAG membership
     if (d.lag) {
         const num = d.lag.replace(/\D/g, '');
         if (num) lines.push(`   channel-group ${num} mode active`);
     }
 
+    // L2
     if (d.mode === 'access' && d.untagged) {
         lines.push(`   switchport mode access`);
         lines.push(`   switchport access vlan ${d.untagged.vid}`);
@@ -344,12 +345,24 @@ function currentConfigLines(d) {
             lines.push(`   switchport trunk allowed vlan ${d.tagged.map(v => v.vid).join(',')}`);
     }
 
+    // L3
     if (d.ips && d.ips.length) {
         lines.push(`   no switchport`);
-        d.ips.forEach(ip => lines.push(`   ip address ${ip.address}`));
+        if (d.vrf) lines.push(`   vrf ${d.vrf}`);
+        // SVI interfaces (Vlan*) except Vlan4094 use "ip address virtual"
+        const isSvi = /^[Vv]lan\d+$/.test(d.name) && d.name.toLowerCase() !== 'vlan4094';
+        d.ips.forEach(ip => {
+            lines.push(`   ip address ${isSvi ? 'virtual ' : ''}${ip.address}`);
+        });
     }
 
-    const hasConfig = d.description || d.mtu || d.mode || d.lag || (d.ips && d.ips.length) || d.enabled === false;
+    // OSPF from config context (intended config)
+    if (d.ospf_ctx) {
+        if (d.ospf_ctx.area)         lines.push(`   ip ospf area ${d.ospf_ctx.area}`);
+        if (d.ospf_ctx.network_type) lines.push(`   ip ospf network ${d.ospf_ctx.network_type}`);
+    }
+
+    const hasConfig = d.description || d.mtu || d.mode || d.lag || (d.ips && d.ips.length) || d.enabled === false || d.ospf_ctx;
     if (!hasConfig) lines.push(`   ! (no config in NetBox)`);
 
     lines.push('!');

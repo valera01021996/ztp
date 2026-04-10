@@ -121,6 +121,7 @@ def ui_device_manage(request: Request, device_name: str,
                 "untagged":    untagged,
                 "tagged":      tagged,
                 "tags":        tags,
+                "vrf":         iface.vrf.name if getattr(iface, "vrf", None) else None,
             })
 
         vlans = [{"vid": vid, "name": name} for vid, name in sorted(vid_map.items())]
@@ -136,7 +137,11 @@ def ui_device_manage(request: Request, device_name: str,
     except Exception:
         pass
 
-    # OSPF state from switch
+    # Config context — OSPF per-interface intended config
+    ctx = dict(device.config_context) if device.config_context else {}
+    ospf_ifaces_ctx: dict[str, dict] = ctx.get("ospf_interfaces", {})
+
+    # OSPF state from switch (live)
     platform = get_platform(device)
     ospf_ifaces: dict[str, dict] = {}
     ospf_error: str = ""
@@ -158,7 +163,8 @@ def ui_device_manage(request: Request, device_name: str,
         ospf_error = str(e)
 
     for iface in interfaces:
-        iface["ospf"] = ospf_ifaces.get(iface["name"])
+        iface["ospf"]     = ospf_ifaces.get(iface["name"])      # live state
+        iface["ospf_ctx"] = ospf_ifaces_ctx.get(iface["name"])  # intended (config context)
 
     role_obj = getattr(device, "role", None) or getattr(device, "device_role", None)
     return ui_templates.TemplateResponse("device_manage.html", {
