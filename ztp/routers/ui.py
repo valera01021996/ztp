@@ -12,8 +12,12 @@ from database import get_db
 router = APIRouter()
 ui_templates = Jinja2Templates(directory=UI_TEMPLATES_DIR)
 import json as _json
+from markupsafe import Markup
 ui_templates.env.filters["tojson_load"] = _json.loads
-ui_templates.env.filters["tojson"] = lambda v: _json.dumps(v, ensure_ascii=False)
+ui_templates.env.filters["tojson"] = lambda v: Markup(
+    _json.dumps(v, ensure_ascii=False)
+    .replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+)
 
 
 @router.get("/ui", response_class=HTMLResponse)
