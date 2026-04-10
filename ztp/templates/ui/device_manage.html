@@ -227,7 +227,7 @@
     background: var(--surface);
     border: 1px solid var(--border2);
     border-radius: 12px;
-    width: 820px; max-width: 95vw; max-height: 90vh;
+    width: 900px; max-width: 95vw; max-height: 92vh;
     overflow: hidden;
     color: var(--text);
     box-shadow: 0 24px 64px rgba(0,0,0,0.6);
@@ -297,13 +297,19 @@
 
         </div>
 
-        <!-- Right: preview -->
-        <div style="padding:20px;display:flex;flex-direction:column;gap:12px;overflow-y:auto;">
+        <!-- Right: current config + preview -->
+        <div style="padding:20px;display:flex;flex-direction:column;gap:16px;overflow-y:auto;">
+            <div>
+                <p class="meta" style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">
+                    Current state <span style="color:var(--text3);font-weight:400;text-transform:none;letter-spacing:0;">(NetBox)</span>
+                </p>
+                <div class="preview-block" id="m-current" style="min-height:100px;color:var(--text2);border-color:var(--border2);"></div>
+            </div>
             <div>
                 <p class="meta" style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">Commands to be sent</p>
-                <div class="preview-block" id="m-preview" style="min-height:180px;">Make changes on the left to preview commands</div>
+                <div class="preview-block" id="m-preview" style="min-height:100px;">Make changes on the left to preview commands</div>
             </div>
-            <div style="display:flex;gap:10px;margin-top:auto;padding-top:12px;">
+            <div style="display:flex;gap:10px;margin-top:auto;padding-top:4px;">
                 <button class="btn btn-success" id="m-apply-btn" onclick="modalApply()" disabled style="flex:1;">✓ Apply to device</button>
                 <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
             </div>
@@ -317,6 +323,28 @@ const IFACES = {{ interfaces | tojson }};
 let _modalIface = {};
 const DEV = '{{ device_name }}';
 
+function currentConfigLines(d) {
+    const lines = [`interface ${d.name}`];
+    if (d.description)  lines.push(`   description ${d.description}`);
+    if (d.mtu)          lines.push(`   mtu ${d.mtu}`);
+    if (d.mode === 'access' && d.untagged) {
+        lines.push(`   switchport mode access`);
+        lines.push(`   switchport access vlan ${d.untagged.vid}`);
+    } else if (d.mode === 'tagged') {
+        lines.push(`   switchport mode trunk`);
+        if (d.tagged && d.tagged.length)
+            lines.push(`   switchport trunk allowed vlan ${d.tagged.map(v => v.vid).join(',')}`);
+    }
+    if (d.ips && d.ips.length) {
+        lines.push(`   no switchport`);
+        d.ips.forEach(ip => lines.push(`   ip address ${ip.address}`));
+    }
+    if (!d.description && !d.mtu && !d.mode && (!d.ips || !d.ips.length))
+        lines.push(`   ! (no L2/L3 config in NetBox)`);
+    lines.push('!');
+    return lines.join('\n');
+}
+
 function openModal(row) {
     _modalIface = IFACES[parseInt(row.dataset.idx)];
     const d = _modalIface;
@@ -329,6 +357,9 @@ function openModal(row) {
     document.getElementById('m-vlans').value = '';
     document.getElementById('m-ip-add').value = '';
     document.getElementById('m-vlan-wrap').style.display = 'none';
+
+    // Show current config from NetBox data
+    document.getElementById('m-current').textContent = currentConfigLines(d);
 
     // Populate current IPs with remove buttons
     const ipList = document.getElementById('m-ip-list');
