@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Request, Form
+from fastapi import APIRouter, Request, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from config import UI_TEMPLATES_DIR, NETWORK_ROLE_SLUGS
@@ -8,6 +8,14 @@ from adapters.h3c import get_h3c
 from builder import build_config
 from pipeline import get_current_config, make_diff, create_pipeline_run, deploy_config
 from database import get_db
+from routers.api import (
+    add_vlan_global as _api_add_vlan,
+    remove_vlan_global as _api_remove_vlan,
+    update_interface as _api_update_iface,
+    add_ip as _api_add_ip,
+    remove_ip as _api_remove_ip,
+    InterfaceUpdate, IpBody,
+)
 
 router = APIRouter()
 ui_templates = Jinja2Templates(directory=UI_TEMPLATES_DIR)
@@ -19,6 +27,15 @@ ui_templates.env.filters["tojson"] = lambda v: Markup(
     .replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
 )
 
+
+def _redirect_err(device_name: str, e: Exception) -> RedirectResponse:
+    detail = getattr(e, "detail", str(e))
+    return RedirectResponse(
+        f"/ui/devices/{device_name}?error={str(detail)[:120]}", status_code=303
+    )
+
+
+# ─── Read-only pages ─────────────────────────────────────────────────────────
 
 @router.get("/ui", response_class=HTMLResponse)
 def ui_dashboard(request: Request):
@@ -58,17 +75,16 @@ def ui_device_manage(request: Request, device_name: str,
                      error: str = None, success: str = None):
     nb = get_nb()
     device = get_device_by_name(nb, device_name)
-    # Collect interfaces and VLANs from NetBox
+
     vlans = []
     interfaces = []
     try:
-        # Fetch all IPs for device once
         ip_by_iface: dict[int, list] = {}
         for ip in nb.ipam.ip_addresses.filter(device_id=device.id):
-            iface_obj = getattr(ip, 'assigned_object', None)
+            iface_obj = getattr(ip, "assigned_object", None)
             iface_id = iface_obj.id if iface_obj else None
             if iface_id:
-                role_val = ip.role.value if getattr(ip, 'role', None) else None
+                role_val = ip.role.value if getattr(ip, "role", None) else None
                 ip_by_iface.setdefault(iface_id, []).append({
                     "address": str(ip.address),
                     "anycast": role_val == "anycast",
@@ -76,31 +92,30 @@ def ui_device_manage(request: Request, device_name: str,
 
         vid_map: dict[int, str] = {}
         for iface in nb.dcim.interfaces.filter(device_id=device.id):
-            mode_obj = getattr(iface, 'mode', None)
+            mode_obj = getattr(iface, "mode", None)
             mode = mode_obj.value if mode_obj else None
-            type_obj = getattr(iface, 'type', None)
+            type_obj = getattr(iface, "type", None)
             iface_type = type_obj.value if type_obj else None
 
             untagged = None
             tagged = []
-            if iface.untagged_vlan and getattr(iface.untagged_vlan, 'vid', None):
+            if iface.untagged_vlan and getattr(iface.untagged_vlan, "vid", None):
                 v = iface.untagged_vlan
                 vid_map.setdefault(v.vid, v.name)
                 untagged = {"vid": v.vid, "name": v.name}
             for v in (iface.tagged_vlans or []):
-                if getattr(v, 'vid', None):
+                if getattr(v, "vid", None):
                     vid_map.setdefault(v.vid, v.name)
                     tagged.append({"vid": v.vid, "name": v.name})
 
             tags = [t.slug for t in (iface.tags or [])]
-
             interfaces.append({
                 "name":        iface.name,
                 "description": iface.description or "",
                 "type":        iface_type,
                 "enabled":     iface.enabled if iface.enabled is not None else True,
                 "mode":        mode,
-                "lag":         iface.lag.name if getattr(iface, 'lag', None) else None,
+                "lag":         iface.lag.name if getattr(iface, "lag", None) else None,
                 "mtu":         iface.mtu,
                 "ips":         ip_by_iface.get(iface.id, []),
                 "untagged":    untagged,
@@ -114,21 +129,20 @@ def ui_device_manage(request: Request, device_name: str,
         def _iface_sort(i):
             name = i["name"]
             prefix = next((v for k, v in _order.items() if name.startswith(k)), 9)
-            num = int(''.join(filter(str.isdigit, name)) or 0)
+            num = int("".join(filter(str.isdigit, name)) or 0)
             return (prefix, num)
         interfaces.sort(key=_iface_sort)
 
     except Exception:
         pass
 
-    # Fetch OSPF interface state from switch
+    # OSPF state from switch
     platform = get_platform(device)
     ospf_ifaces: dict[str, dict] = {}
     ospf_error: str = ""
     try:
         if platform == "eos":
             result = get_eapi(device).run(["enable", "show ip ospf interface brief"])
-            # EOS wraps interfaces under vrfs -> <vrf> -> interfaces
             all_ifaces = {}
             for vrf_data in result[1].get("vrfs", {}).values():
                 for inst_data in vrf_data.get("instList", {}).values():
@@ -143,67 +157,56 @@ def ui_device_manage(request: Request, device_name: str,
     except Exception as e:
         ospf_error = str(e)
 
-    # Merge OSPF data into interfaces
     for iface in interfaces:
         iface["ospf"] = ospf_ifaces.get(iface["name"])
 
-    role_obj = getattr(device, 'role', None) or getattr(device, 'device_role', None)
+    role_obj = getattr(device, "role", None) or getattr(device, "device_role", None)
     return ui_templates.TemplateResponse("device_manage.html", {
-        "request":    request,
+        "request":     request,
         "device_name": device_name,
-        "platform":   get_platform(device),
-        "role":       role_obj.name if role_obj else "—",
-        "primary_ip": str(device.primary_ip4).split("/")[0] if device.primary_ip4 else "—",
-        "vlans":      vlans,
-        "interfaces": interfaces,
-        "ospf_error": ospf_error,
-        "error":      error,
-        "success":    success,
-        "active":     "devices",
+        "platform":    platform,
+        "role":        role_obj.name if role_obj else "—",
+        "primary_ip":  str(device.primary_ip4).split("/")[0] if device.primary_ip4 else "—",
+        "vlans":       vlans,
+        "interfaces":  interfaces,
+        "ospf_error":  ospf_error,
+        "error":       error,
+        "success":     success,
+        "active":      "devices",
     })
 
+
+# ─── VLAN management ─────────────────────────────────────────────────────────
 
 @router.post("/ui/devices/{device_name}/vlans")
 def ui_add_vlan(device_name: str, vid: int = Form(...), name: str = Form("")):
     try:
         nb = get_nb()
         device = get_device_by_name(nb, device_name)
-        platform = get_platform(device)
-
-        existing = next(iter(nb.ipam.vlans.filter(vid=vid)), None)
-        if not existing:
-            nb.ipam.vlans.create({"vid": vid, "name": name or f"VLAN{vid}"})
-
-        if platform == "comware":
+        if get_platform(device) == "comware":
+            existing = next(iter(nb.ipam.vlans.filter(vid=vid)), None)
+            if not existing:
+                nb.ipam.vlans.create({"vid": vid, "name": name or f"VLAN{vid}"})
             get_h3c(device).create_vlan(vid, name or f"VLAN{vid}")
         else:
-            get_eapi(device).run([
-                "enable", "configure",
-                f"vlan {vid}",
-                f"name {name or f'VLAN{vid}'}",
-            ])
-
+            _api_add_vlan(device_name, vid, name)
         return RedirectResponse(f"/ui/devices/{device_name}?success=VLAN+{vid}+added", status_code=303)
     except Exception as e:
-        return RedirectResponse(f"/ui/devices/{device_name}?error={str(e)[:120]}", status_code=303)
+        return _redirect_err(device_name, e)
 
 
 @router.post("/ui/devices/{device_name}/vlans/{vid}/delete_global")
 def ui_delete_vlan_global(device_name: str, vid: int):
-    """Delete VLAN globally from switch only — does not touch NetBox."""
     try:
         nb = get_nb()
         device = get_device_by_name(nb, device_name)
-        platform = get_platform(device)
-
-        if platform == "comware":
+        if get_platform(device) == "comware":
             get_h3c(device)._cli([f"undo vlan {vid}"])
         else:
-            get_eapi(device).run(["enable", "configure", f"no vlan {vid}"])
-
+            _api_remove_vlan(device_name, vid)
         return RedirectResponse(f"/ui/devices/{device_name}?success=VLAN+{vid}+removed+from+switch", status_code=303)
     except Exception as e:
-        return RedirectResponse(f"/ui/devices/{device_name}?error={str(e)[:120]}", status_code=303)
+        return _redirect_err(device_name, e)
 
 
 @router.post("/ui/devices/{device_name}/vlans/{vid}/remove_from_port")
@@ -214,7 +217,6 @@ def ui_remove_vlan_from_port(device_name: str, vid: int, interface: str = Form(.
         device = get_device_by_name(nb, device_name)
         platform = get_platform(device)
 
-        # Update NetBox interface
         nb_iface = nb.dcim.interfaces.get(device_id=device.id, name=interface)
         is_access = False
         if nb_iface:
@@ -222,39 +224,28 @@ def ui_remove_vlan_from_port(device_name: str, vid: int, interface: str = Form(.
                 is_access = True
                 nb_iface.update({"untagged_vlan": None, "mode": None})
             else:
-                new_tagged = [v.id for v in (nb_iface.tagged_vlans or []) if v.vid != vid]
-                nb_iface.update({"tagged_vlans": new_tagged})
+                # Delegate trunk VLAN removal to API
+                _api_update_iface(device_name, interface, InterfaceUpdate(trunk_vlans_remove=[vid]))
+                return RedirectResponse(
+                    f"/ui/devices/{device_name}?success=VLAN+{vid}+removed+from+{interface}", status_code=303
+                )
 
-        # Update switch — different command for access vs trunk
+        # Access port: remove on switch (API has no dedicated endpoint for this)
         if platform == "comware":
-            if is_access:
-                get_h3c(device)._cli([
-                    f"interface {interface}",
-                    "undo port access vlan",
-                ])
-            else:
-                get_h3c(device)._cli([
-                    f"interface {interface}",
-                    f"undo port trunk permit vlan {vid}",
-                ])
+            get_h3c(device)._cli([f"interface {interface}", "undo port access vlan"])
         else:
-            if is_access:
-                get_eapi(device).run([
-                    "enable", "configure",
-                    f"interface {interface}",
-                    "no switchport access vlan",
-                ])
-            else:
-                get_eapi(device).run([
-                    "enable", "configure",
-                    f"interface {interface}",
-                    f"switchport trunk allowed vlan remove {vid}",
-                ])
+            get_eapi(device).run([
+                "enable", "configure",
+                f"interface {interface}",
+                "no switchport access vlan",
+            ])
 
         return RedirectResponse(f"/ui/devices/{device_name}?success=VLAN+{vid}+removed+from+{interface}", status_code=303)
     except Exception as e:
-        return RedirectResponse(f"/ui/devices/{device_name}?error={str(e)[:120]}", status_code=303)
+        return _redirect_err(device_name, e)
 
+
+# ─── Interface management ─────────────────────────────────────────────────────
 
 @router.post("/ui/devices/{device_name}/trunk")
 def ui_trunk(device_name: str, interface: str = Form(...), vlans: str = Form(...)):
@@ -262,34 +253,26 @@ def ui_trunk(device_name: str, interface: str = Form(...), vlans: str = Form(...
         vlan_list = [int(v.strip()) for v in vlans.split(",") if v.strip()]
         nb = get_nb()
         device = get_device_by_name(nb, device_name)
-        platform = get_platform(device)
-
-        nb_iface = nb.dcim.interfaces.get(device_id=device.id, name=interface)
-        if not nb_iface:
-            nb_iface = nb.dcim.interfaces.create(device=device.id, name=interface, type="1000base-t")
-
-        current_vids = {v.id for v in (nb_iface.tagged_vlans or [])}
-        for vid in vlan_list:
-            vlan_obj = next(iter(nb.ipam.vlans.filter(vid=vid)), None)
-            if not vlan_obj:
-                vlan_obj = nb.ipam.vlans.create({"vid": vid, "name": f"VLAN{vid}"})
-            current_vids.add(vlan_obj.id)
-        nb_iface.update({"mode": "tagged", "tagged_vlans": list(current_vids)})
-
-        if platform == "comware":
+        if get_platform(device) == "comware":
             get_h3c(device).set_trunk_vlans(interface, vlan_list)
+            # Sync NetBox manually for comware
+            nb_iface = nb.dcim.interfaces.get(device_id=device.id, name=interface)
+            if not nb_iface:
+                nb_iface = nb.dcim.interfaces.create(device=device.id, name=interface, type="1000base-t")
+            current_ids = {v.id for v in (nb_iface.tagged_vlans or [])}
+            for vid in vlan_list:
+                vlan_obj = next(iter(nb.ipam.vlans.filter(vid=vid)), None)
+                if not vlan_obj:
+                    vlan_obj = nb.ipam.vlans.create({"vid": vid, "name": f"VLAN{vid}"})
+                current_ids.add(vlan_obj.id)
+            nb_iface.update({"mode": "tagged", "tagged_vlans": list(current_ids)})
         else:
-            vids_str = ",".join(str(v) for v in vlan_list)
-            get_eapi(device).run([
-                "enable", "configure",
-                f"interface {interface}",
-                "switchport mode trunk",
-                f"switchport trunk allowed vlan add {vids_str}",
-            ])
-
+            _api_update_iface(device_name, interface, InterfaceUpdate(
+                mode="trunk", trunk_vlans_add=vlan_list
+            ))
         return RedirectResponse(f"/ui/devices/{device_name}?success=Trunk+configured+on+{interface}", status_code=303)
     except Exception as e:
-        return RedirectResponse(f"/ui/devices/{device_name}?error={str(e)[:120]}", status_code=303)
+        return _redirect_err(device_name, e)
 
 
 @router.post("/ui/devices/{device_name}/access")
@@ -298,125 +281,64 @@ def ui_access(device_name: str, interface: str = Form(...),
     try:
         nb = get_nb()
         device = get_device_by_name(nb, device_name)
-        platform = get_platform(device)
-
-        vlan_obj = next(iter(nb.ipam.vlans.filter(vid=vlan)), None)
-        if not vlan_obj:
-            vlan_obj = nb.ipam.vlans.create({"vid": vlan, "name": f"VLAN{vlan}"})
-
-        nb_iface = nb.dcim.interfaces.get(device_id=device.id, name=interface)
-        if not nb_iface:
-            nb_iface = nb.dcim.interfaces.create(device=device.id, name=interface, type="1000base-t")
-
-        update = {"mode": "access", "untagged_vlan": vlan_obj.id}
-        if description:
-            update["description"] = description
-        nb_iface.update(update)
-
-        if platform == "comware":
+        if get_platform(device) == "comware":
             get_h3c(device).set_access_vlan(interface, vlan, description)
-        else:
-            cmds = ["enable", "configure", f"interface {interface}",
-                    "switchport mode access", f"switchport access vlan {vlan}"]
+            # Sync NetBox manually for comware
+            vlan_obj = next(iter(nb.ipam.vlans.filter(vid=vlan)), None)
+            if not vlan_obj:
+                vlan_obj = nb.ipam.vlans.create({"vid": vlan, "name": f"VLAN{vlan}"})
+            nb_iface = nb.dcim.interfaces.get(device_id=device.id, name=interface)
+            if not nb_iface:
+                nb_iface = nb.dcim.interfaces.create(device=device.id, name=interface, type="1000base-t")
+            update = {"mode": "access", "untagged_vlan": vlan_obj.id}
             if description:
-                cmds.append(f"description {description}")
-            get_eapi(device).run(cmds)
-
+                update["description"] = description
+            nb_iface.update(update)
+        else:
+            _api_update_iface(device_name, interface, InterfaceUpdate(
+                mode="access",
+                access_vlan=vlan,
+                description=description or None,
+            ))
         return RedirectResponse(f"/ui/devices/{device_name}?success=Access+port+{interface}+set+to+VLAN+{vlan}", status_code=303)
     except Exception as e:
-        return RedirectResponse(f"/ui/devices/{device_name}?error={str(e)[:120]}", status_code=303)
+        return _redirect_err(device_name, e)
 
 
 @router.post("/ui/devices/{device_name}/interfaces/{iface}/update")
 def ui_iface_update(device_name: str, iface: str,
                     description: str = Form(""), mtu: str = Form("")):
-    """Update interface description and/or MTU."""
     try:
-        nb = get_nb()
-        device = get_device_by_name(nb, device_name)
-        platform = get_platform(device)
-
-        nb_iface = nb.dcim.interfaces.get(device_id=device.id, name=iface)
-        if nb_iface:
-            update = {}
-            if description != "":
-                update["description"] = description
-            if mtu:
-                update["mtu"] = int(mtu)
-            if update:
-                nb_iface.update(update)
-
-        cmds = ["enable", "configure", f"interface {iface}"]
-        if description != "":
-            cmds.append(f"description {description}" if description else "no description")
-        if mtu:
-            cmds.append(f"mtu {mtu}")
-        if platform == "eos" and len(cmds) > 3:
-            get_eapi(device).run(cmds)
-
+        _api_update_iface(device_name, iface, InterfaceUpdate(
+            description=description if description != "" else None,
+            mtu=int(mtu) if mtu else None,
+        ))
         return RedirectResponse(f"/ui/devices/{device_name}?success=Interface+{iface}+updated", status_code=303)
     except Exception as e:
-        return RedirectResponse(f"/ui/devices/{device_name}?error={str(e)[:120]}", status_code=303)
+        return _redirect_err(device_name, e)
 
+
+# ─── IP management ────────────────────────────────────────────────────────────
 
 @router.post("/ui/devices/{device_name}/ip/add")
 def ui_ip_add(device_name: str, interface: str = Form(...), address: str = Form(...)):
-    """Add IP address to interface — updates switch and NetBox."""
     try:
-        nb = get_nb()
-        device = get_device_by_name(nb, device_name)
-        platform = get_platform(device)
-
-        # Find or create IP in NetBox and assign to interface
-        nb_iface = nb.dcim.interfaces.get(device_id=device.id, name=interface)
-        ip_obj = next(iter(nb.ipam.ip_addresses.filter(address=address)), None)
-        if not ip_obj:
-            ip_obj = nb.ipam.ip_addresses.create({"address": address})
-        if nb_iface:
-            ip_obj.update({
-                "assigned_object_type": "dcim.interface",
-                "assigned_object_id": nb_iface.id,
-            })
-
-        # Push to switch
-        if platform == "eos":
-            get_eapi(device).run([
-                "enable", "configure",
-                f"interface {interface}",
-                "no switchport",
-                f"ip address {address}",
-            ])
-
+        _api_add_ip(device_name, interface, IpBody(address=address))
         return RedirectResponse(f"/ui/devices/{device_name}?success=IP+{address}+set+on+{interface}", status_code=303)
     except Exception as e:
-        return RedirectResponse(f"/ui/devices/{device_name}?error={str(e)[:120]}", status_code=303)
+        return _redirect_err(device_name, e)
 
 
 @router.post("/ui/devices/{device_name}/ip/remove")
 def ui_ip_remove(device_name: str, interface: str = Form(...), address: str = Form(...)):
-    """Remove IP address from interface — updates switch and NetBox."""
     try:
-        nb = get_nb()
-        device = get_device_by_name(nb, device_name)
-        platform = get_platform(device)
-
-        # Unassign from NetBox (delete IP object)
-        ip_obj = next(iter(nb.ipam.ip_addresses.filter(address=address)), None)
-        if ip_obj:
-            ip_obj.update({"assigned_object_type": None, "assigned_object_id": None})
-
-        # Push to switch
-        if platform == "eos":
-            get_eapi(device).run([
-                "enable", "configure",
-                f"interface {interface}",
-                f"no ip address {address}",
-            ])
-
+        _api_remove_ip(device_name, interface, address)
         return RedirectResponse(f"/ui/devices/{device_name}?success=IP+{address}+removed+from+{interface}", status_code=303)
     except Exception as e:
-        return RedirectResponse(f"/ui/devices/{device_name}?error={str(e)[:120]}", status_code=303)
+        return _redirect_err(device_name, e)
 
+
+# ─── Pipeline ─────────────────────────────────────────────────────────────────
 
 @router.post("/ui/generate/{device_name}")
 def ui_generate(device_name: str):
@@ -443,7 +365,6 @@ def ui_run_detail(request: Request, run_id: int):
     with get_db() as conn:
         run = conn.execute("SELECT * FROM pipeline_runs WHERE id = ?", (run_id,)).fetchone()
     if not run:
-        from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Run not found")
     return ui_templates.TemplateResponse("run_detail.html", {
         "request": request, "run": run, "active": "dashboard"
@@ -455,7 +376,6 @@ def ui_approve(run_id: int):
     with get_db() as conn:
         run = conn.execute("SELECT * FROM pipeline_runs WHERE id = ?", (run_id,)).fetchone()
         if not run:
-            from fastapi import HTTPException
             raise HTTPException(status_code=404, detail="Run not found")
 
     nb = get_nb()
@@ -466,13 +386,11 @@ def ui_approve(run_id: int):
     try:
         deploy_config(device, run["generated_config"])
         status = "deployed"
-        # Обновляем теги в NetBox
         from pipeline import get_or_create_tag, post_deploy_check
         current_tags = [t for t in (device.tags or []) if t.slug not in ("config-pending", "day0-deployed")]
         deployed_tag = get_or_create_tag(nb, "config-deployed", "config-deployed", "4caf50")
         current_tags.append(deployed_tag)
         device.update({"tags": [{"id": t.id} for t in current_tags]})
-        # Проверяем состояние BGP/OSPF после деплоя
         import json
         check_result = json.dumps(post_deploy_check(device), ensure_ascii=False)
     except Exception as e:
@@ -489,6 +407,17 @@ def ui_approve(run_id: int):
     return RedirectResponse(f"/ui/runs/{run_id}", status_code=303)
 
 
+@router.post("/ui/runs/{run_id}/reject")
+def ui_reject(run_id: int):
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE pipeline_runs SET status='rejected', updated_at=datetime('now','localtime') WHERE id=?",
+            (run_id,)
+        )
+        conn.commit()
+    return RedirectResponse(f"/ui/runs/{run_id}", status_code=303)
+
+
 @router.post("/ui/devices/{device_name}/rollback")
 def ui_rollback(device_name: str):
     from builder import build_config
@@ -500,15 +429,4 @@ def ui_rollback(device_name: str):
         deploy_config_replace(device, config)
         return RedirectResponse(f"/ui/devices/{device_name}?success=Rollback+to+Day0+complete", status_code=303)
     except Exception as e:
-        return RedirectResponse(f"/ui/devices/{device_name}?error={str(e)[:120]}", status_code=303)
-
-
-@router.post("/ui/runs/{run_id}/reject")
-def ui_reject(run_id: int):
-    with get_db() as conn:
-        conn.execute(
-            "UPDATE pipeline_runs SET status='rejected', updated_at=datetime('now','localtime') WHERE id=?",
-            (run_id,)
-        )
-        conn.commit()
-    return RedirectResponse(f"/ui/runs/{run_id}", status_code=303)
+        return _redirect_err(device_name, e)
