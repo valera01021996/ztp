@@ -11,7 +11,9 @@ from database import get_db
 
 router = APIRouter()
 ui_templates = Jinja2Templates(directory=UI_TEMPLATES_DIR)
-ui_templates.env.filters["tojson_load"] = __import__("json").loads
+import json as _json
+ui_templates.env.filters["tojson_load"] = _json.loads
+ui_templates.env.filters["tojson"] = lambda v: _json.dumps(v, ensure_ascii=False)
 
 
 @router.get("/ui", response_class=HTMLResponse)

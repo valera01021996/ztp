@@ -161,7 +161,7 @@
         <tbody>
         {% for iface in interfaces %}
         <tr class="iface-row" style="cursor:pointer;{% if not iface.enabled %}opacity:0.45;{% endif %}"
-            data-iface='{{ iface | tojson }}'
+            data-idx="{{ loop.index0 }}"
             onclick="openModal(this)">
             <td style="width:8px;padding-right:0;" onclick="event.stopPropagation()">
                 <span style="display:inline-block;width:7px;height:7px;border-radius:50%;
@@ -306,11 +306,12 @@
 </dialog>
 
 <script>
+const IFACES = {{ interfaces | tojson }};
 let _modalIface = {};
 const DEV = '{{ device_name }}';
 
 function openModal(row) {
-    _modalIface = JSON.parse(row.dataset.iface);
+    _modalIface = IFACES[parseInt(row.dataset.idx)];
     const d = _modalIface;
 
     document.getElementById('m-name').textContent = d.name;
