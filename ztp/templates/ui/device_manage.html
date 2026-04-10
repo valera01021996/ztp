@@ -152,283 +152,324 @@
                 <th>Description</th>
                 <th>LAG</th>
                 <th>Mode</th>
-                <th>Access VLAN</th>
-                <th>Trunk VLANs</th>
+                <th>VLANs</th>
                 <th>IP Address</th>
                 <th>MTU</th>
-                <th>OSPF {% if ospf_error %}<span style="color:#f87171; font-size:10px; font-weight:400;" title="{{ ospf_error }}">⚠ error</span>{% endif %}</th>
+                <th>OSPF {% if ospf_error %}<span style="color:#f87171;font-size:10px;font-weight:400;" title="{{ ospf_error }}">⚠</span>{% endif %}</th>
             </tr>
         </thead>
         <tbody>
         {% for iface in interfaces %}
-        <tr style="{% if not iface.enabled %}opacity:0.45;{% endif %}">
-            <td style="width:8px; padding-right:0;">
-                <span title="{% if iface.enabled %}enabled{% else %}disabled{% endif %}"
-                      style="display:inline-block; width:7px; height:7px; border-radius:50%;
+        <tr class="iface-row" style="cursor:pointer;{% if not iface.enabled %}opacity:0.45;{% endif %}"
+            data-iface='{{ iface | tojson }}'
+            onclick="openModal(this)">
+            <td style="width:8px;padding-right:0;" onclick="event.stopPropagation()">
+                <span style="display:inline-block;width:7px;height:7px;border-radius:50%;
                              background:{% if iface.enabled %}var(--green){% else %}var(--red){% endif %};"></span>
             </td>
-            <td class="mono" style="font-size:12px; white-space:nowrap;">
+            <td class="mono" style="font-size:12px;white-space:nowrap;">
                 {{ iface.name }}
                 {% if 'mlag-portchannel' in iface.tags %}
-                <span style="font-size:10px; color:#a78bfa; border:1px solid rgba(167,139,250,0.3);
-                             background:rgba(167,139,250,0.08); border-radius:3px; padding:1px 4px; margin-left:4px;">mlag</span>
+                <span style="font-size:10px;color:#a78bfa;border:1px solid rgba(167,139,250,0.3);
+                             background:rgba(167,139,250,0.08);border-radius:3px;padding:1px 4px;margin-left:4px;">mlag</span>
                 {% endif %}
             </td>
-            <td style="font-size:12px; color:var(--text2); max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+            <td style="font-size:12px;color:var(--text2);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
                 {{ iface.description or '—' }}
             </td>
-            <td class="mono" style="font-size:11px; color:var(--text3);">{{ iface.lag or '—' }}</td>
+            <td class="mono" style="font-size:11px;color:var(--text3);">{{ iface.lag or '—' }}</td>
             <td>
-                {% if iface.mode == 'access' %}
-                <span class="badge badge-pending" style="font-size:10px;">access</span>
-                {% elif iface.mode == 'tagged' %}
-                <span class="badge badge-approved" style="font-size:10px;">trunk</span>
-                {% elif iface.mode %}
-                <span class="badge" style="font-size:10px;">{{ iface.mode }}</span>
-                {% else %}
-                <span class="meta">—</span>
-                {% endif %}
+                {% if iface.mode == 'access' %}<span class="badge badge-pending" style="font-size:10px;">access</span>
+                {% elif iface.mode == 'tagged' %}<span class="badge badge-approved" style="font-size:10px;">trunk</span>
+                {% elif iface.mode %}<span class="badge" style="font-size:10px;">{{ iface.mode }}</span>
+                {% else %}<span class="meta">—</span>{% endif %}
             </td>
-            <td>
-                {% if iface.untagged %}
-                <span class="vlan-chip" title="{{ iface.untagged.name }}">
-                    {{ iface.untagged.vid }}
-                    <form method="post"
-                          action="/ui/devices/{{ device_name }}/vlans/{{ iface.untagged.vid }}/remove_from_port"
-                          style="display:inline;"
-                          onsubmit="return confirm('Remove VLAN {{ iface.untagged.vid }} from {{ iface.name }}?')">
-                        <input type="hidden" name="interface" value="{{ iface.name }}">
-                        <button type="submit" title="Remove">×</button>
-                    </form>
-                </span>
-                {% else %}
-                <span class="meta">—</span>
-                {% endif %}
-            </td>
-            <td>
-                {% if iface.tagged %}
-                {% for v in iface.tagged %}
-                <span class="vlan-chip" title="{{ v.name }}">
-                    {{ v.vid }}
-                    <form method="post"
-                          action="/ui/devices/{{ device_name }}/vlans/{{ v.vid }}/remove_from_port"
-                          style="display:inline;"
-                          onsubmit="return confirm('Remove VLAN {{ v.vid }} from {{ iface.name }}?')">
-                        <input type="hidden" name="interface" value="{{ iface.name }}">
-                        <button type="submit" title="Remove">×</button>
-                    </form>
-                </span>
-                {% endfor %}
-                {% else %}
-                <span class="meta">—</span>
-                {% endif %}
+            <td style="font-size:12px;">
+                {% if iface.untagged %}<span class="vlan-chip">{{ iface.untagged.vid }}</span>{% endif %}
+                {% for v in iface.tagged %}<span class="vlan-chip">{{ v.vid }}</span>{% endfor %}
+                {% if not iface.untagged and not iface.tagged %}<span class="meta">—</span>{% endif %}
             </td>
             <td style="font-size:12px;">
                 {% for ip in iface.ips %}
-                <div style="display:flex; align-items:center; gap:4px; margin-bottom:2px; white-space:nowrap;">
+                <div style="white-space:nowrap;">
                     <span class="mono">{{ ip.address }}</span>
-                    {% if ip.anycast %}
-                    <span style="font-size:10px; color:#f59e0b; border:1px solid rgba(245,158,11,0.3);
-                                 background:rgba(245,158,11,0.08); border-radius:3px; padding:1px 4px;">anycast</span>
-                    {% endif %}
-                    <form method="post" action="/ui/devices/{{ device_name }}/ip/remove"
-                          style="display:inline;"
-                          onsubmit="return confirm('Remove {{ ip.address }} from {{ iface.name }}?')">
-                        <input type="hidden" name="interface" value="{{ iface.name }}">
-                        <input type="hidden" name="address" value="{{ ip.address }}">
-                        <button type="submit" style="background:none; border:none; color:#f87171; cursor:pointer; font-size:13px; padding:0 2px;" title="Remove IP">×</button>
-                    </form>
+                    {% if ip.anycast %}<span style="font-size:10px;color:#f59e0b;border:1px solid rgba(245,158,11,0.3);background:rgba(245,158,11,0.08);border-radius:3px;padding:1px 4px;margin-left:3px;">anycast</span>{% endif %}
                 </div>
-                {% else %}
-                <span class="meta">—</span>
-                {% endfor %}
+                {% else %}<span class="meta">—</span>{% endfor %}
             </td>
             <td class="meta" style="font-size:12px;">{{ iface.mtu or '—' }}</td>
-            <td style="font-size:11px; white-space:nowrap;">
+            <td style="font-size:11px;">
                 {% if iface.ospf %}
-                <div style="display:flex; flex-direction:column; gap:2px;">
-                    <span style="color:{% if iface.ospf.up %}var(--green){% else %}#f87171{% endif %}; font-weight:600;">
-                        area {{ iface.ospf.area }}
-                    </span>
-                    <span class="meta" style="font-size:10px;">{{ iface.ospf.network_type }}</span>
-                </div>
-                {% else %}
-                <span class="meta">—</span>
-                {% endif %}
+                <span style="color:{% if iface.ospf.up %}var(--green){% else %}#94a3b8{% endif %};">area {{ iface.ospf.area }}</span>
+                {% else %}<span class="meta">—</span>{% endif %}
             </td>
         </tr>
         {% endfor %}
         </tbody>
     </table>
     {% else %}
-    <div style="padding: 20px; color: var(--text3); font-size: 13px;">No interfaces found.</div>
+    <div style="padding:20px;color:var(--text3);font-size:13px;">No interfaces found.</div>
     {% endif %}
     </div>
 </details>
 
-<!-- Configure Port with live preview -->
-<div class="card">
-    <div class="card-header">
-        <h2>Configure Port</h2>
+<!-- Interface modal -->
+<dialog id="iface-modal" style="
+    background: var(--surface);
+    border: 1px solid var(--border2);
+    border-radius: 12px;
+    padding: 0;
+    width: 820px;
+    max-width: 95vw;
+    max-height: 90vh;
+    overflow: hidden;
+    color: var(--text);
+    box-shadow: 0 24px 64px rgba(0,0,0,0.6);
+">
+<div style="display:flex;flex-direction:column;height:100%;max-height:90vh;">
+
+    <!-- Modal header -->
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:18px 24px;border-bottom:1px solid var(--border);flex-shrink:0;">
+        <div>
+            <span id="m-name" class="mono" style="font-size:16px;font-weight:700;color:var(--text);"></span>
+            <span id="m-desc-hint" class="meta" style="margin-left:10px;font-size:13px;"></span>
+        </div>
+        <button onclick="document.getElementById('iface-modal').close()"
+                style="background:none;border:none;color:var(--text3);font-size:20px;cursor:pointer;padding:4px 8px;line-height:1;">×</button>
     </div>
-    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
 
-        <!-- Form -->
-        <div style="display: flex; flex-direction: column; gap: 14px;">
+    <!-- Modal body -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;flex:1;overflow:hidden;">
+
+        <!-- Left: config sections -->
+        <div style="padding:20px;overflow-y:auto;border-right:1px solid var(--border);display:flex;flex-direction:column;gap:20px;">
+
+            <!-- General -->
             <div>
-                <label class="meta" style="display:block; margin-bottom:5px;">Interface</label>
-                <input type="text" id="cfg-interface" placeholder="e.g. Port-Channel3"
-                       class="form-input" oninput="updatePreview()">
+                <p class="meta" style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px;">General</p>
+                <div style="display:flex;flex-direction:column;gap:10px;">
+                    <div>
+                        <label class="meta" style="display:block;margin-bottom:4px;">Description</label>
+                        <input id="m-description" class="form-input" placeholder="e.g. Link_To_Spine1" oninput="modalPreview()">
+                    </div>
+                    <div>
+                        <label class="meta" style="display:block;margin-bottom:4px;">MTU</label>
+                        <input id="m-mtu" class="form-input" type="number" placeholder="e.g. 9214" oninput="modalPreview()">
+                    </div>
+                </div>
             </div>
+
+            <!-- L2 -->
             <div>
-                <label class="meta" style="display:block; margin-bottom:5px;">Action</label>
-                <select id="cfg-mode" class="form-input" onchange="updatePreview()">
-                    <option value="access">Set access VLAN</option>
-                    <option value="trunk-add">Add VLANs to trunk</option>
-                    <option value="trunk-remove">Remove VLANs from trunk</option>
-                    <option value="ip-add">Set IP address</option>
-                    <option value="ip-remove">Remove IP address</option>
-                </select>
+                <p class="meta" style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px;">L2 — VLANs</p>
+                <div style="display:flex;flex-direction:column;gap:10px;">
+                    <div>
+                        <label class="meta" style="display:block;margin-bottom:4px;">Action</label>
+                        <select id="m-l2-action" class="form-input" onchange="modalPreview()">
+                            <option value="">— no change —</option>
+                            <option value="access">Set access VLAN</option>
+                            <option value="trunk-add">Add VLANs to trunk</option>
+                            <option value="trunk-remove">Remove VLANs from trunk</option>
+                        </select>
+                    </div>
+                    <div id="m-vlan-wrap" style="display:none;">
+                        <label class="meta" style="display:block;margin-bottom:4px;" id="m-vlan-label">VLAN</label>
+                        <input id="m-vlans" class="form-input" placeholder="e.g. 20" oninput="modalPreview()">
+                    </div>
+                </div>
             </div>
+
+            <!-- L3 -->
             <div>
-                <label class="meta" style="display:block; margin-bottom:5px;" id="cfg-value-label">
-                    VLAN<span id="plural-s"></span>
-                </label>
-                <input type="text" id="cfg-vlans" placeholder="e.g. 20 or 10,20,30"
-                       class="form-input" oninput="updatePreview()">
+                <p class="meta" style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px;">L3 — IP Addresses</p>
+                <div id="m-ip-list" style="margin-bottom:10px;display:flex;flex-direction:column;gap:4px;"></div>
+                <div style="display:flex;gap:8px;">
+                    <input id="m-ip-add" class="form-input" placeholder="Add IP, e.g. 10.0.0.1/30" oninput="modalPreview()">
+                </div>
             </div>
-            <div id="desc-wrap">
-                <label class="meta" style="display:block; margin-bottom:5px;">Description (optional)</label>
-                <input type="text" id="cfg-desc" placeholder="e.g. SRV1"
-                       class="form-input" oninput="updatePreview()">
-            </div>
+
         </div>
 
-        <!-- Preview + Apply -->
-        <div style="display: flex; flex-direction: column; gap: 12px;">
+        <!-- Right: preview -->
+        <div style="padding:20px;display:flex;flex-direction:column;gap:12px;overflow-y:auto;">
             <div>
-                <label class="meta" style="display:block; margin-bottom:6px;">Commands to be sent</label>
-                <div class="preview-block" id="cmd-preview">Fill in the form to preview commands</div>
+                <p class="meta" style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">Commands to be sent</p>
+                <div class="preview-block" id="m-preview" style="min-height:180px;">Make changes on the left to preview commands</div>
             </div>
-            <button type="button" class="btn btn-success" onclick="applyConfig()" id="apply-btn" disabled>
-                ✓ Apply to device
-            </button>
+            <div style="display:flex;gap:10px;margin-top:auto;padding-top:12px;">
+                <button class="btn btn-success" id="m-apply-btn" onclick="modalApply()" disabled style="flex:1;">✓ Apply to device</button>
+                <button class="btn btn-ghost" onclick="document.getElementById('iface-modal').close()">Cancel</button>
+            </div>
         </div>
-
     </div>
 </div>
+</dialog>
 
 <script>
-function updatePreview() {
-    const iface  = document.getElementById('cfg-interface').value.trim();
-    const mode   = document.getElementById('cfg-mode').value;
-    const vlans  = document.getElementById('cfg-vlans').value.trim();
-    const desc   = document.getElementById('cfg-desc').value.trim();
-    const preview = document.getElementById('cmd-preview');
-    const btn    = document.getElementById('apply-btn');
+let _modalIface = {};
+const DEV = '{{ device_name }}';
 
-    const isIpMode = mode === 'ip-add' || mode === 'ip-remove';
+function openModal(row) {
+    _modalIface = JSON.parse(row.dataset.iface);
+    const d = _modalIface;
 
-    // Update label
-    document.getElementById('cfg-value-label').firstChild.textContent =
-        isIpMode ? 'IP Address (CIDR)' : (mode === 'access' ? 'VLAN' : 'VLANs');
-    document.getElementById('cfg-vlans').placeholder =
-        isIpMode ? 'e.g. 10.0.254.5/30' : (mode === 'access' ? 'e.g. 20' : 'e.g. 10,20,30');
-    document.getElementById('plural-s').textContent = '';
+    document.getElementById('m-name').textContent = d.name;
+    document.getElementById('m-desc-hint').textContent = d.description || '';
+    document.getElementById('m-description').value = d.description || '';
+    document.getElementById('m-mtu').value = d.mtu || '';
+    document.getElementById('m-l2-action').value = '';
+    document.getElementById('m-vlans').value = '';
+    document.getElementById('m-ip-add').value = '';
+    document.getElementById('m-vlan-wrap').style.display = 'none';
 
-    // Show/hide description field
-    document.getElementById('desc-wrap').style.display =
-        (mode === 'trunk-remove' || isIpMode) ? 'none' : 'block';
-
-    if (!iface || !vlans) {
-        preview.textContent = 'Fill in the form to preview commands';
-        preview.classList.remove('has-content');
-        btn.disabled = true;
-        return;
+    // Populate current IPs with remove buttons
+    const ipList = document.getElementById('m-ip-list');
+    ipList.innerHTML = '';
+    (d.ips || []).forEach(ip => {
+        const div = document.createElement('div');
+        div.style.cssText = 'display:flex;align-items:center;gap:8px;';
+        div.innerHTML = `
+            <span class="mono" style="font-size:13px;color:var(--text);">${ip.address}</span>
+            ${ip.anycast ? '<span style="font-size:10px;color:#f59e0b;border:1px solid rgba(245,158,11,0.3);background:rgba(245,158,11,0.08);border-radius:3px;padding:1px 5px;">anycast</span>' : ''}
+            <button onclick="removeIp('${ip.address}')" style="background:none;border:none;color:#f87171;cursor:pointer;font-size:14px;margin-left:auto;">×</button>
+        `;
+        ipList.appendChild(div);
+    });
+    if (!d.ips || d.ips.length === 0) {
+        ipList.innerHTML = '<span class="meta" style="font-size:12px;">No IPs assigned</span>';
     }
+
+    modalPreview();
+    document.getElementById('iface-modal').showModal();
+}
+
+document.getElementById('m-l2-action').addEventListener('change', function() {
+    const v = this.value;
+    const wrap = document.getElementById('m-vlan-wrap');
+    const lbl  = document.getElementById('m-vlan-label');
+    wrap.style.display = v ? 'block' : 'none';
+    lbl.textContent = v === 'access' ? 'VLAN' : 'VLANs (e.g. 10,20)';
+    document.getElementById('m-vlans').placeholder = v === 'access' ? 'e.g. 20' : 'e.g. 10,20,30';
+    modalPreview();
+});
+
+function modalPreview() {
+    const iface   = _modalIface.name || '';
+    const desc    = document.getElementById('m-description').value.trim();
+    const mtu     = document.getElementById('m-mtu').value.trim();
+    const l2act   = document.getElementById('m-l2-action').value;
+    const vlans   = document.getElementById('m-vlans').value.trim();
+    const ipAdd   = document.getElementById('m-ip-add').value.trim();
+    const preview = document.getElementById('m-preview');
+    const btn     = document.getElementById('m-apply-btn');
+
+    const origDesc = _modalIface.description || '';
+    const origMtu  = String(_modalIface.mtu || '');
 
     let lines = [];
-    if (mode === 'access') {
-        lines = [
-            `interface ${iface}`,
-            `   switchport mode access`,
-            `   switchport access vlan ${vlans}`,
-        ];
-        if (desc) lines.push(`   description ${desc}`);
-    } else if (mode === 'trunk-add') {
-        lines = [
-            `interface ${iface}`,
-            `   switchport mode trunk`,
-            `   switchport trunk allowed vlan add ${vlans}`,
-        ];
-    } else if (mode === 'trunk-remove') {
-        lines = [
-            `interface ${iface}`,
-            `   switchport trunk allowed vlan remove ${vlans}`,
-        ];
-    } else if (mode === 'ip-add') {
-        lines = [
-            `interface ${iface}`,
-            `   no switchport`,
-            `   ip address ${vlans}`,
-        ];
-    } else if (mode === 'ip-remove') {
-        lines = [
-            `interface ${iface}`,
-            `   no ip address ${vlans}`,
-        ];
+
+    // General changes
+    const descChanged = desc !== origDesc;
+    const mtuChanged  = mtu !== origMtu && mtu !== '';
+    if (descChanged || mtuChanged) {
+        lines.push(`interface ${iface}`);
+        if (descChanged) lines.push(`   ${desc ? 'description ' + desc : 'no description'}`);
+        if (mtuChanged)  lines.push(`   mtu ${mtu}`);
+        lines.push('!');
     }
 
-    preview.textContent = lines.join('\n');
-    preview.classList.add('has-content');
-    btn.disabled = false;
+    // L2 changes
+    if (l2act && vlans) {
+        lines.push(`interface ${iface}`);
+        if (l2act === 'access') {
+            lines.push(`   switchport mode access`);
+            lines.push(`   switchport access vlan ${vlans}`);
+        } else if (l2act === 'trunk-add') {
+            lines.push(`   switchport mode trunk`);
+            lines.push(`   switchport trunk allowed vlan add ${vlans}`);
+        } else if (l2act === 'trunk-remove') {
+            lines.push(`   switchport trunk allowed vlan remove ${vlans}`);
+        }
+        lines.push('!');
+    }
+
+    // L3 changes
+    if (ipAdd) {
+        lines.push(`interface ${iface}`);
+        lines.push(`   no switchport`);
+        lines.push(`   ip address ${ipAdd}`);
+        lines.push('!');
+    }
+
+    if (lines.length === 0) {
+        preview.textContent = 'Make changes on the left to preview commands';
+        preview.classList.remove('has-content');
+        btn.disabled = true;
+    } else {
+        preview.textContent = lines.join('\n');
+        preview.classList.add('has-content');
+        btn.disabled = false;
+    }
 }
 
-function applyConfig() {
-    const iface = document.getElementById('cfg-interface').value.trim();
-    const mode  = document.getElementById('cfg-mode').value;
-    const vlans = document.getElementById('cfg-vlans').value.trim();
-    const desc  = document.getElementById('cfg-desc').value.trim();
+function modalApply() {
+    const iface  = _modalIface.name;
+    const desc   = document.getElementById('m-description').value.trim();
+    const mtu    = document.getElementById('m-mtu').value.trim();
+    const l2act  = document.getElementById('m-l2-action').value;
+    const vlans  = document.getElementById('m-vlans').value.trim();
+    const ipAdd  = document.getElementById('m-ip-add').value.trim();
 
-    const btn = document.getElementById('apply-btn');
-    btn.disabled = true;
-    btn.textContent = 'Applying…';
+    const origDesc = _modalIface.description || '';
+    const origMtu  = String(_modalIface.mtu || '');
+    const descChanged = desc !== origDesc;
+    const mtuChanged  = mtu !== origMtu && mtu !== '';
 
-    const form = document.createElement('form');
-    form.method = 'post';
-
-    function addField(name, value) {
-        const inp = document.createElement('input');
-        inp.name = name; inp.value = value;
-        form.appendChild(inp);
+    function submit(action, fields) {
+        const f = document.createElement('form');
+        f.method = 'post'; f.action = action;
+        Object.entries(fields).forEach(([k,v]) => {
+            const i = document.createElement('input');
+            i.name = k; i.value = v; f.appendChild(i);
+        });
+        document.body.appendChild(f);
+        f.submit();
     }
 
-    if (mode === 'access') {
-        form.action = `/ui/devices/{{ device_name }}/access`;
-        addField('interface', iface);
-        addField('vlan', vlans);
-        addField('description', desc);
-    } else if (mode === 'trunk-add') {
-        form.action = `/ui/devices/{{ device_name }}/trunk`;
-        addField('interface', iface);
-        addField('vlans', vlans);
-    } else if (mode === 'trunk-remove') {
-        const vids = vlans.split(',').map(v => v.trim()).filter(Boolean);
-        form.action = `/ui/devices/{{ device_name }}/vlans/${vids[0]}/remove_from_port`;
-        addField('interface', iface);
-    } else if (mode === 'ip-add') {
-        form.action = `/ui/devices/{{ device_name }}/ip/add`;
-        addField('interface', iface);
-        addField('address', vlans);
-    } else if (mode === 'ip-remove') {
-        form.action = `/ui/devices/{{ device_name }}/ip/remove`;
-        addField('interface', iface);
-        addField('address', vlans);
+    // Priority: L2 > L3 > General (chain via redirect anyway — only one submit fires)
+    if (l2act && vlans) {
+        if (l2act === 'access')
+            submit(`/ui/devices/${DEV}/access`, {interface: iface, vlan: vlans, description: desc});
+        else if (l2act === 'trunk-add')
+            submit(`/ui/devices/${DEV}/trunk`, {interface: iface, vlans});
+        else if (l2act === 'trunk-remove') {
+            const vid = vlans.split(',')[0].trim();
+            submit(`/ui/devices/${DEV}/vlans/${vid}/remove_from_port`, {interface: iface});
+        }
+    } else if (ipAdd) {
+        submit(`/ui/devices/${DEV}/ip/add`, {interface: iface, address: ipAdd});
+    } else if (descChanged || mtuChanged) {
+        submit(`/ui/devices/${DEV}/interfaces/${encodeURIComponent(iface)}/update`,
+               {description: desc, mtu: mtu});
     }
-
-    document.body.appendChild(form);
-    form.submit();
 }
+
+function removeIp(address) {
+    if (!confirm(`Remove ${address} from ${_modalIface.name}?`)) return;
+    const f = document.createElement('form');
+    f.method = 'post';
+    f.action = `/ui/devices/${DEV}/ip/remove`;
+    [['interface', _modalIface.name], ['address', address]].forEach(([k,v]) => {
+        const i = document.createElement('input'); i.name=k; i.value=v; f.appendChild(i);
+    });
+    document.body.appendChild(f);
+    f.submit();
+}
+
+// Close modal on backdrop click
+document.getElementById('iface-modal').addEventListener('click', function(e) {
+    if (e.target === this) this.close();
+});
 </script>
 
 {% endblock %}

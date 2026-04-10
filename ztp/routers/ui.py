@@ -321,6 +321,38 @@ def ui_access(device_name: str, interface: str = Form(...),
         return RedirectResponse(f"/ui/devices/{device_name}?error={str(e)[:120]}", status_code=303)
 
 
+@router.post("/ui/devices/{device_name}/interfaces/{iface}/update")
+def ui_iface_update(device_name: str, iface: str,
+                    description: str = Form(""), mtu: str = Form("")):
+    """Update interface description and/or MTU."""
+    try:
+        nb = get_nb()
+        device = get_device_by_name(nb, device_name)
+        platform = get_platform(device)
+
+        nb_iface = nb.dcim.interfaces.get(device_id=device.id, name=iface)
+        if nb_iface:
+            update = {}
+            if description != "":
+                update["description"] = description
+            if mtu:
+                update["mtu"] = int(mtu)
+            if update:
+                nb_iface.update(update)
+
+        cmds = ["enable", "configure", f"interface {iface}"]
+        if description != "":
+            cmds.append(f"description {description}" if description else "no description")
+        if mtu:
+            cmds.append(f"mtu {mtu}")
+        if platform == "eos" and len(cmds) > 3:
+            get_eapi(device).run(cmds)
+
+        return RedirectResponse(f"/ui/devices/{device_name}?success=Interface+{iface}+updated", status_code=303)
+    except Exception as e:
+        return RedirectResponse(f"/ui/devices/{device_name}?error={str(e)[:120]}", status_code=303)
+
+
 @router.post("/ui/devices/{device_name}/ip/add")
 def ui_ip_add(device_name: str, interface: str = Form(...), address: str = Form(...)):
     """Add IP address to interface — updates switch and NetBox."""
